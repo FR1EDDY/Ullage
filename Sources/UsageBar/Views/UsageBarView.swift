@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A single meter row: title + "N% used" on top, a rounded capsule bar, and
@@ -6,39 +7,79 @@ struct UsageBarView: View {
     let title: String
     let window: UsageWindow
     var compact: Bool = false
+    /// Per-app brand tint (e.g. Claude's coral, Cursor's blue). When set, the
+    /// bar uses this instead of the blue/yellow/red severity scale, except
+    /// once a window is genuinely near its cap — the danger signal still
+    /// needs to cut through the branding.
+    var brandColor: Color? = nil
+    var brandGradient: LinearGradient? = nil
+    /// The app's real icon, looked up live from the installed app on disk.
+    var icon: NSImage? = nil
+    var inactive: Bool = false
 
     private var color: Color {
-        switch window.percentUsed {
-        case ..<50: return .blue
-        case 50..<80: return .yellow
-        default: return .red
+        guard let brandColor else {
+            switch window.percentUsed {
+            case ..<50: return .blue
+            case 50..<80: return .yellow
+            default: return .red
+            }
         }
+        return window.percentUsed >= 80 ? .red : brandColor
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(compact ? .caption : .subheadline)
-                    .foregroundStyle(.primary)
-                Spacer()
-                Text("\(Int(window.percentUsed.rounded()))% used")
-                    .font(compact ? .caption2 : .caption)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: compact ? 10 : 8) {
+            if let icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: compact ? 28 : 18, height: compact ? 28 : 18)
+                    .clipShape(RoundedRectangle(cornerRadius: compact ? 7 : 4, style: .continuous))
+                    .opacity(inactive ? 0.8 : 1.0)
+                    .mask(
+                        Group {
+                            if inactive {
+                                Image(nsImage: icon)
+                                    .resizable()
+                                    .luminanceToAlpha()
+                            } else {
+                                Rectangle()
+                            }
+                        }
+                    )
             }
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(color.opacity(0.18))
-                    Capsule()
-                        .fill(color)
-                        .frame(width: proxy.size.width * fraction)
+            VStack(alignment: .leading, spacing: compact ? 4 : 4) {
+                HStack {
+                    Text(title)
+                        .font(compact ? .subheadline.weight(.semibold) : .subheadline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(Int(window.percentUsed.rounded()))% used")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(color.opacity(0.18))
+                        if window.percentUsed < 80, let brandGradient {
+                            Capsule()
+                                .fill(brandGradient)
+                                .frame(width: proxy.size.width * fraction)
+                                .shadow(color: color.opacity(0.3), radius: 3, x: 0, y: 0)
+                        } else {
+                            Capsule()
+                                .fill(color)
+                                .frame(width: proxy.size.width * fraction)
+                                .shadow(color: color.opacity(0.3), radius: 3, x: 0, y: 0)
+                        }
+                    }
+                }
+                .frame(height: compact ? 6 : 7)
+                Text(ResetText.label(for: window.resetsAt))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .frame(height: compact ? 5 : 7)
-            Text(ResetText.label(for: window.resetsAt))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
     }
 
