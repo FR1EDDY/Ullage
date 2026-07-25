@@ -56,46 +56,45 @@ extension NSImage {
 private struct BadgeLabel: View {
     @ObservedObject var model: UsageModel
 
-    private static let claudeIcon = AppIcon.icon(
-        forAppNamed: "Claude", bundleID: "com.anthropic.claudefordesktop")?.pureStencilMask()
-    private static let cursorIcon = AppIcon.icon(
-        forAppNamed: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92")?.pureStencilMask()
+    /// Stencils are expensive to build and never change, so they're cut once
+    /// per provider and cached. Driven off the registry rather than named
+    /// constants, so a new platform needs no change here.
+    private static let stencils: [ProviderID: NSImage] = {
+        var result: [ProviderID: NSImage] = [:]
+        for descriptor in ProviderRegistry.available {
+            if let stencil = descriptor.icon?.pureStencilMask() {
+                result[descriptor.id] = stencil
+            }
+        }
+        return result
+    }()
 
-    private var showClaude: Bool { model.badgeDisplayMode != .cursor }
-    private var showCursor: Bool { model.badgeDisplayMode != .claude }
-
-    private var sessionText: String { model.session.map { "\(Int($0.percentUsed.rounded()))%" } ?? "…" }
-    private var cursorText: String { model.cursor.map { "\(Int($0.percentUsed.rounded()))%" } ?? "—" }
+    /// The percentage each provider contributes to the badge. This is the one
+    /// place a new platform has to say what its headline number is.
+    private func badgeText(for id: ProviderID) -> String {
+        switch id {
+        case .claude:
+            return model.session.map { "\(Int($0.percentUsed.rounded()))%" } ?? "…"
+        case .cursor:
+            return model.cursor.map { "\(Int($0.percentUsed.rounded()))%" } ?? "—"
+        case .chatgpt, .gemini:
+            return "—"
+        }
+    }
 
     @MainActor
     private var renderedImage: NSImage? {
+        let selected = model.badgeSelection.providers
         let content = HStack(spacing: 6) {
-            if showClaude {
-                HStack(spacing: 2) {
-                    if let icon = Self.claudeIcon {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .renderingMode(.template)
-                            .foregroundColor(.black)
-                            .frame(width: 26, height: 26)
-                            .padding(.horizontal, -4)
-                    }
-                    Text(sessionText)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.black)
+            ForEach(Array(selected.enumerated()), id: \.element) { index, id in
+                if index > 0 {
+                    Text("|")
+                        .font(.system(size: 14, weight: .light))
+                        .foregroundColor(.black.opacity(0.4))
+                        .padding(.horizontal, 2)
                 }
-            }
-
-            if showClaude && showCursor {
-                Text("|")
-                    .font(.system(size: 14, weight: .light))
-                    .foregroundColor(.black.opacity(0.4))
-                    .padding(.horizontal, 2)
-            }
-
-            if showCursor {
                 HStack(spacing: 2) {
-                    if let icon = Self.cursorIcon {
+                    if let icon = Self.stencils[id] {
                         Image(nsImage: icon)
                             .resizable()
                             .renderingMode(.template)
@@ -103,7 +102,7 @@ private struct BadgeLabel: View {
                             .frame(width: 26, height: 26)
                             .padding(.horizontal, -4)
                     }
-                    Text(cursorText)
+                    Text(badgeText(for: id))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.black)
                 }
@@ -131,8 +130,9 @@ private struct BadgeLabel: View {
         if let img = renderedImage {
             Image(nsImage: img)
         } else {
-            // Fallback if rendering ever fails: plain text so the label is never blank.
-            Text("\(sessionText) | \(cursorText)")
+            // Fallback if rendering ever fails: plain text so the label is
+            // never blank. Same providers, same order as the composed badge.
+            Text(model.badgeSelection.providers.map(badgeText(for:)).joined(separator: " | "))
         }
     }
 }

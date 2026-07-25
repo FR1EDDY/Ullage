@@ -28,17 +28,36 @@ struct ClaudeUsage: Equatable, Codable, Sendable {
     /// from the provider's cache, so this — not the time it was handed to the
     /// UI — is what "Updated Xs ago" has to report.
     var observedAt: Date
+    /// The exact response body this reading was decoded from, carried through to
+    /// `SnapshotStore` so history keeps a copy of fields we don't map yet.
+    ///
+    /// Deliberately absent from `CodingKeys`, so it is *not* written to the
+    /// UserDefaults cache: that cache exists to make a cold start instant, and
+    /// stuffing a few kilobytes of JSON into it every poll would work against
+    /// exactly that. The store dedupes and compresses it instead. A property
+    /// with a default value may be omitted from `CodingKeys`; decoding simply
+    /// leaves it `nil`.
+    var rawPayload: Data?
 
     init(
         planName: String?,
         session: UsageWindow,
         weeklyAllModels: UsageWindow,
-        observedAt: Date
+        observedAt: Date,
+        rawPayload: Data? = nil
     ) {
         self.planName = planName
         self.session = session
         self.weeklyAllModels = weeklyAllModels
         self.observedAt = observedAt
+        self.rawPayload = rawPayload
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case planName
+        case session
+        case weeklyAllModels
+        case observedAt
     }
 }
 
@@ -55,25 +74,77 @@ struct CursorUsage: Equatable, Codable, Sendable {
     /// Usage against named/API models.
     var apiPercentUsed: Double
     var resetsAt: Date?
+    /// Start of the current billing cycle. Pairs with `resetsAt` to give the
+    /// window a length, which is what a spend-per-day rate needs.
+    var startsAt: Date?
     var cycleLabel: String?
+    /// Spend this billing cycle, in US dollars. All optional because a response
+    /// without them must still produce a usable reading — the percentage meters
+    /// are the part that has to keep working.
+    var totalSpend: Double?
+    /// Spend billed beyond the plan. The dashboard's "On-demand".
+    var onDemandSpend: Double?
+    /// The plan's included allowance and what's left of it, in dollars. Useful
+    /// beyond the raw total: "your $20 is gone, you're on bonus credit" is a
+    /// different situation from "you've spent $20 of $20 and that's fine".
+    var includedAllowance: Double?
+    var includedRemaining: Double?
+    /// Whether Cursor will bill beyond the included allowance. `false` with the
+    /// allowance spent is the one combination that stops work outright.
+    var onDemandEnabled: Bool?
     /// When this reading came off the wire, used to decide when a retained
     /// value has aged past the point of being worth showing.
     var observedAt: Date
+    /// The response body this reading came from — see `ClaudeUsage.rawPayload`
+    /// for why it's excluded from `CodingKeys`.
+    var rawPayload: Data?
 
     init(
         percentUsed: Double,
         firstPartyPercentUsed: Double,
         apiPercentUsed: Double,
         resetsAt: Date?,
+        startsAt: Date? = nil,
         cycleLabel: String?,
-        observedAt: Date
+        totalSpend: Double? = nil,
+        onDemandSpend: Double? = nil,
+        includedAllowance: Double? = nil,
+        includedRemaining: Double? = nil,
+        onDemandEnabled: Bool? = nil,
+        observedAt: Date,
+        rawPayload: Data? = nil
     ) {
         self.percentUsed = percentUsed
         self.firstPartyPercentUsed = firstPartyPercentUsed
         self.apiPercentUsed = apiPercentUsed
         self.resetsAt = resetsAt
+        self.startsAt = startsAt
         self.cycleLabel = cycleLabel
+        self.totalSpend = totalSpend
+        self.onDemandSpend = onDemandSpend
+        self.includedAllowance = includedAllowance
+        self.includedRemaining = includedRemaining
+        self.onDemandEnabled = onDemandEnabled
         self.observedAt = observedAt
+        self.rawPayload = rawPayload
+    }
+
+    /// Whether there's a spend figure worth drawing a card for.
+    var hasSpend: Bool { totalSpend != nil }
+
+    enum CodingKeys: String, CodingKey {
+        case percentUsed
+        case firstPartyPercentUsed
+        case apiPercentUsed
+        case resetsAt
+        case startsAt
+        case cycleLabel
+        case totalSpend
+        case onDemandSpend
+        case includedAllowance
+        case includedRemaining
+        case onDemandEnabled
+        case observedAt
     }
 }
 

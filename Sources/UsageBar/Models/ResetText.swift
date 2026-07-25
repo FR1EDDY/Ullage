@@ -1,25 +1,78 @@
 import Foundation
 
-/// Formats a reset `Date` the way Claude's own usage panel does: relative
-/// ("Resets in 55 min") when the reset is coming up soon, absolute
-/// ("Resets Fri 8:00 AM") once it's far enough out that a countdown isn't useful.
+/// The two halves of a reset subtitle: how long you have (`countdown`) and when
+/// that actually lands on your own clock (`clock`).
+///
+/// These used to be one string that showed *either* a countdown or an absolute
+/// time depending on distance — "Resets in 55 min" up close, "Resets Fri 8:00 AM"
+/// further out. Each answers a different question, though, and a meter row has
+/// room for both: "in 3 hr 49 min" tells you whether to keep working, "11:47 PM"
+/// tells you whether that's before or after you go to bed.
+///
+/// Everything below is the display layer, so it is the one place that may use
+/// the user's own calendar and time zone — the reset instants themselves are
+/// absolute, and stay absolute everywhere else in the app.
 enum ResetText {
-    /// Past this, a weekday name alone is ambiguous — "Wed" could be any of
-    /// several Wednesdays — so the absolute format switches to a calendar date.
-    /// Claude's reset windows (5-hour, 7-day) never reach this far, but
-    /// Cursor's monthly billing-cycle reset routinely does.
+    /// Past this, a bare weekday recurs and is ambiguous — "Wed" could be any
+    /// of several Wednesdays — so the clock switches to a calendar date. This
+    /// is what Cursor's monthly billing-cycle reset needs; Claude's 5-hour and
+    /// 7-day windows never reach it.
     private static let weekdayAmbiguityThreshold: TimeInterval = 6 * 24 * 60 * 60
 
-    static func label(for date: Date?, now: Date = Date()) -> String {
+    /// Left half — "Resets in 3 hr 49 min".
+    static func countdown(for date: Date?, now: Date = Date()) -> String {
         guard let date else { return "Resets —" }
         let interval = date.timeIntervalSince(now)
-        if interval <= 0 {
-            return "Resets soon"
+        guard interval > 0 else { return "Resets soon" }
+        return "Resets in \(relative(interval))"
+    }
+
+    /// Right half — the wall-clock instant in the user's own time zone, or
+    /// `nil` when there's nothing to place (no date, or it has already passed).
+    ///
+    /// Three shapes, each dropping the detail that stops being useful:
+    ///   - later today → `11:47 PM` (a weekday would be noise)
+    ///   - within six days → `Fri 8:00 AM`
+    ///   - beyond that → `Aug 5` (a precise time three weeks out is noise)
+    static func clock(
+        for date: Date?,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String? {
+        guard let date else { return nil }
+        let interval = date.timeIntervalSince(now)
+        guard interval > 0 else { return nil }
+
+        let formatter = DateFormatter()
+        // Set before the template is resolved — the template is interpreted
+        // against the formatter's locale, so assigning it afterwards would have
+        // no effect on the pattern already chosen.
+        formatter.locale = locale
+        // Rendered in the same zone the same-day comparison below uses.
+        // `DateFormatter` otherwise defaults to the system zone independently of
+        // the calendar, so the two could disagree and label a reset "today" while
+        // printing tomorrow's hour.
+        formatter.timeZone = calendar.timeZone
+        // Templates rather than literal patterns, so someone on a 24-hour clock
+        // sees "23:47" and not "11:47 PM". `dateFormat = "h:mm a"` would have
+        // forced 12-hour formatting on every user regardless of their settings.
+        if calendar.isDate(date, inSameDayAs: now) {
+            formatter.setLocalizedDateFormatFromTemplate("jmm")
+        } else if interval < weekdayAmbiguityThreshold {
+            formatter.setLocalizedDateFormatFromTemplate("EEEjmm")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("MMMd")
         }
-        if interval < 36 * 60 * 60 {
-            return "Resets in \(relative(interval))"
-        }
-        return "Resets \(absolute(date, interval: interval))"
+        return formatter.string(from: date)
+    }
+
+    /// Both halves on one line, for layouts with no right-hand column to put
+    /// the clock in.
+    static func label(for date: Date?, now: Date = Date()) -> String {
+        let countdown = countdown(for: date, now: now)
+        guard let clock = clock(for: date, now: now) else { return countdown }
+        return "\(countdown) · \(clock)"
     }
 
     private static func relative(_ interval: TimeInterval) -> String {
@@ -34,11 +87,5 @@ enum ResetText {
         }
         let days = hours / 24
         return "\(days) day\(days == 1 ? "" : "s")"
-    }
-
-    private static func absolute(_ date: Date, interval: TimeInterval) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = interval < weekdayAmbiguityThreshold ? "EEE h:mm a" : "MMM d"
-        return formatter.string(from: date)
     }
 }

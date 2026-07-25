@@ -60,4 +60,148 @@ final class ClaudeUsageProviderTests: XCTestCase {
         XCTAssertNil(decoded.sevenDay)
         XCTAssertNil(decoded.limits)
     }
+
+    /// The raw body rides along on the reading (so history can keep a copy) but
+    /// must stay out of the UserDefaults cache, which exists to make cold start
+    /// fast and would be defeated by a few KB of JSON per poll.
+    func testRawPayloadIsNotPersistedInTheCachedReading() throws {
+        let usage = ClaudeUsage(
+            planName: "Max",
+            session: UsageWindow(percentUsed: 68, resetsAt: nil, isActive: true),
+            weeklyAllModels: UsageWindow(percentUsed: 28, resetsAt: nil, isActive: false),
+            observedAt: Date(timeIntervalSince1970: 1_760_000_000),
+            rawPayload: Data(String(repeating: "x", count: 4096).utf8)
+        )
+
+        let encoded = try JSONEncoder().encode(usage)
+        let decoded = try JSONDecoder().decode(ClaudeUsage.self, from: encoded)
+
+        XCTAssertNil(decoded.rawPayload)
+        XCTAssertLessThan(encoded.count, 256)
+        XCTAssertEqual(decoded.planName, "Max")
+        XCTAssertEqual(decoded.session.percentUsed, 68)
+        XCTAssertEqual(decoded.weeklyAllModels.percentUsed, 28)
+        XCTAssertEqual(decoded.observedAt, usage.observedAt)
+    }
+
+    // MARK: - Rate-limit header strategy
+
+    /// The shape the third strategy reads: utilization and reset for both
+    /// unified windows, straight off the response headers.
+    func testRateLimitHeadersProduceBothWindows() throws {
+        let resetsAt = Date(timeIntervalSince1970: 1_760_018_000)
+        let weeklyResetsAt = Date(timeIntervalSince1970: 1_760_400_000)
+        let usage = try XCTUnwrap(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: [
+                "anthropic-ratelimit-unified-5h-utilization": "42",
+                "anthropic-ratelimit-unified-5h-reset": "1760018000",
+                "anthropic-ratelimit-unified-7d-utilization": "17.5",
+                "anthropic-ratelimit-unified-7d-reset": "1760400000",
+                "content-type": "application/json"
+            ],
+            planName: "Max",
+            observedAt: Date(timeIntervalSince1970: 1_760_000_000)
+        ))
+
+        XCTAssertEqual(usage.session.percentUsed, 42)
+        XCTAssertEqual(usage.session.resetsAt, resetsAt)
+        XCTAssertTrue(usage.session.isActive)
+        XCTAssertEqual(usage.weeklyAllModels.percentUsed, 17.5)
+        XCTAssertEqual(usage.weeklyAllModels.resetsAt, weeklyResetsAt)
+        XCTAssertEqual(usage.planName, "Max")
+    }
+
+    /// Only the `anthropic-ratelimit-*` headers are kept as the stored payload —
+    /// no cookies, tokens or anything else off the response.
+    func testRateLimitPayloadKeepsOnlyRateLimitHeaders() throws {
+        let usage = try XCTUnwrap(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: [
+                "anthropic-ratelimit-unified-5h-utilization": "42",
+                "set-cookie": "secret=value",
+                "authorization": "Bearer nope"
+            ],
+            planName: nil,
+            observedAt: Date()
+        ))
+
+        let payload = try XCTUnwrap(usage.rawPayload)
+        let decoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: payload) as? [String: String]
+        )
+        XCTAssertEqual(decoded, ["anthropic-ratelimit-unified-5h-utilization": "42"])
+    }
+
+    /// Partial headers are still worth something: report the window we know and
+    /// leave the other empty rather than discarding the whole reading.
+    func testRateLimitHeadersWithOnlyOneWindow() throws {
+        let usage = try XCTUnwrap(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: ["anthropic-ratelimit-unified-7d-utilization": "60"],
+            planName: nil,
+            observedAt: Date()
+        ))
+        XCTAssertEqual(usage.weeklyAllModels.percentUsed, 60)
+        XCTAssertTrue(usage.weeklyAllModels.isActive)
+        XCTAssertEqual(usage.session.percentUsed, 0)
+        // Absent, not "0% used" — an empty window must not read as an active one.
+        XCTAssertFalse(usage.session.isActive)
+    }
+
+    /// No unified headers at all means this strategy has nothing to say, and
+    /// must say so rather than inventing a 0%/0% reading.
+    func testRateLimitHeadersAbsentYieldsNil() {
+        XCTAssertNil(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: ["content-type": "application/json"],
+            planName: nil,
+            observedAt: Date()
+        ))
+        XCTAssertNil(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: [:],
+            planName: nil,
+            observedAt: Date()
+        ))
+    }
+
+    func testRateLimitUtilizationIsClamped() throws {
+        let usage = try XCTUnwrap(ClaudeUsageProvider.usage(
+            fromRateLimitHeaders: [
+                "anthropic-ratelimit-unified-5h-utilization": "140",
+                "anthropic-ratelimit-unified-7d-utilization": "-3"
+            ],
+            planName: nil,
+            observedAt: Date()
+        ))
+        XCTAssertEqual(usage.session.percentUsed, 100)
+        XCTAssertEqual(usage.weeklyAllModels.percentUsed, 0)
+    }
+
+    /// The reset header has been seen as an epoch and as RFC-3339; both parse,
+    /// and a small number is read as "seconds from now" rather than as a 1970
+    /// timestamp that would make every window look permanently expired.
+    func testResetHeaderAcceptsEpochAndISO8601() throws {
+        XCTAssertEqual(
+            ClaudeUsageProvider.resetDate(fromHeader: "1760018000"),
+            Date(timeIntervalSince1970: 1_760_018_000)
+        )
+        // Built from components rather than a hand-computed epoch so the
+        // expectation is readable and can't be wrong by a day's arithmetic.
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 7
+        components.day = 15
+        components.hour = 17
+        components.minute = 9
+        components.second = 59
+        components.timeZone = TimeZone(identifier: "UTC")
+        let expected = try XCTUnwrap(Calendar(identifier: .gregorian).date(from: components))
+
+        let iso = try XCTUnwrap(ClaudeUsageProvider.resetDate(fromHeader: "2026-07-15T17:09:59.777408+00:00"))
+        XCTAssertEqual(iso.timeIntervalSince1970, expected.timeIntervalSince1970, accuracy: 1)
+
+        let relative = try XCTUnwrap(ClaudeUsageProvider.resetDate(fromHeader: "300"))
+        XCTAssertEqual(relative.timeIntervalSinceNow, 300, accuracy: 5)
+
+        XCTAssertNil(ClaudeUsageProvider.resetDate(fromHeader: nil))
+        XCTAssertNil(ClaudeUsageProvider.resetDate(fromHeader: ""))
+        XCTAssertNil(ClaudeUsageProvider.resetDate(fromHeader: "not-a-date"))
+    }
 }

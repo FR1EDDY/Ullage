@@ -33,6 +33,14 @@ final class UsageModel: ObservableObject {
     /// The stored Cursor cookie was rejected (expired/revoked). The UI turns this
     /// into a "Reconnect" prompt — the one Cursor failure the user must act on.
     @Published private(set) var cursorNeedsReauth: Bool = false
+    /// Spend reconstructed from local Claude Code transcripts. Independent of
+    /// every network path above — it keeps working when the usage endpoint is
+    /// rate-limiting us or the cookie has died, which is exactly when the rest
+    /// of the panel has least to say.
+    @Published private(set) var cost: CostSummary?
+    /// Where each window is heading, derived from the persisted history. Empty
+    /// until enough of that history exists to say anything honest.
+    @Published private(set) var forecasts: Forecasts = .none
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var claudeError: UsageError?
     /// When the provider will next permit a network call, or `nil` if one is
@@ -41,12 +49,14 @@ final class UsageModel: ObservableObject {
     @Published private(set) var claudeRetryAt: Date?
     @Published private(set) var isLaunchAtLoginEnabled: Bool
     @Published var isHudVisible: Bool = false
-    /// Which providers appear in the menu-bar badge.
-    @Published private(set) var badgeDisplayMode: BadgeDisplayMode
+    /// Which providers appear in the menu-bar badge, in order.
+    @Published private(set) var badgeSelection: BadgeSelection
     /// Preferred polling cadence. Rate-limit backoff still widens above this.
     @Published private(set) var refreshIntervalOption: RefreshIntervalOption
 
+    /// Legacy key, read once for migration and never written again.
     private static let badgeDisplayModeKey = "badgeDisplayMode"
+    private static let badgeSelectionKey = "badgeProviders"
     private static let refreshIntervalKey = "refreshIntervalMinutes"
     private static let maxRefreshInterval: TimeInterval = 1800
 
@@ -60,6 +70,11 @@ final class UsageModel: ObservableObject {
 
     private let claudeProvider = ClaudeUsageProvider()
     private let cursorProvider = CursorUsageProvider()
+    private let costProvider = ClaudeCostProvider()
+    private let forecastEngine = ForecastEngine()
+    /// Usage history, for the forecasting that comes later. Optional on purpose:
+    /// if the file can't be opened we lose forecasting, never the menu bar.
+    private let snapshotStore = SnapshotStore.shared
     private var timer: Timer?
     private var refreshTask: Task<Void, Never>?
     private var currentRefreshInterval: TimeInterval
@@ -71,11 +86,18 @@ final class UsageModel: ObservableObject {
     private var baseRefreshInterval: TimeInterval { refreshIntervalOption.timeInterval }
 
     init() {
-        let storedBadge = UserDefaults.standard.string(forKey: Self.badgeDisplayModeKey)
-            .flatMap(BadgeDisplayMode.init(rawValue:)) ?? .both
+        // Prefer the new list; fall back to the old three-way enum so an
+        // existing install keeps whatever the user had chosen, then never reads
+        // the legacy key again.
+        let storedBadge = BadgeSelection.fromStorage(
+            UserDefaults.standard.string(forKey: Self.badgeSelectionKey)
+        ) ?? UserDefaults.standard.string(forKey: Self.badgeDisplayModeKey)
+            .flatMap(BadgeDisplayMode.init(rawValue:))
+            .map { BadgeSelection($0.providers) }
+            ?? .default
         let storedMinutes = UserDefaults.standard.object(forKey: Self.refreshIntervalKey) as? Int
         let storedInterval = storedMinutes.flatMap(RefreshIntervalOption.init(rawValue:)) ?? .five
-        self.badgeDisplayMode = storedBadge
+        self.badgeSelection = storedBadge
         self.refreshIntervalOption = storedInterval
         self.currentRefreshInterval = storedInterval.timeInterval
 
@@ -101,6 +123,7 @@ final class UsageModel: ObservableObject {
         self.isLaunchAtLoginEnabled = LaunchAtLogin.isEnabled
 
         registerSleepWakeObservers()
+        pruneSnapshotHistory()
         refresh()
     }
 
@@ -163,15 +186,22 @@ final class UsageModel: ObservableObject {
         refreshTask = Task { [weak self] in
             guard let self else { return }
             let attemptStartedAt = Date()
+            // Cost is local work, not a network call — it runs alongside the
+            // two fetches rather than after them, and is never gated by their
+            // cooldowns. Its first run on a large transcript tree takes a few
+            // seconds; that happens off the main thread, and the meters above
+            // render without waiting for it.
             async let claudeResult = self.claudeProvider.fetch()
             async let cursorResult = self.cursorProvider.fetch()
-            let (claude, cursor) = await (claudeResult, cursorResult)
+            async let costResult = self.costProvider.summary()
+            let (claude, cursor, cost) = await (claudeResult, cursorResult, costResult)
             let retryAvailableAt = await self.claudeProvider.retryAvailableAt()
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self.apply(
                     claude: claude,
                     cursor: cursor,
+                    cost: cost,
                     attemptStartedAt: attemptStartedAt,
                     retryAvailableAt: retryAvailableAt
                 )
@@ -185,10 +215,12 @@ final class UsageModel: ObservableObject {
     private func apply(
         claude: Result<ClaudeUsage, UsageError>,
         cursor: CursorFetchResult,
+        cost: CostSummary,
         attemptStartedAt: Date,
         retryAvailableAt: Date?
     ) {
         claudeRetryAt = retryAvailableAt
+        self.cost = cost
         var nextDelay = currentRefreshInterval
         var jittered = true
 
@@ -290,9 +322,97 @@ final class UsageModel: ObservableObject {
         isClaudeConnected = session != nil || ClaudeUsageProvider.hasAnyCredentials()
         claudeSignedInViaApp = ClaudeUsageProvider.hasStoredLogin()
 
+        // Persist this poll and re-forecast from the updated history. Passed the
+        // readings we just accepted — a cache-served reading carries its
+        // original `observedAt`, which the store recognizes and drops, so this
+        // stays safe to call unconditionally.
+        persistAndForecast(
+            claude: try? claude.get(),
+            cursor: { if case .success(let usage) = cursor { return usage } else { return nil } }()
+        )
+
         scheduleNextRefresh(after: nextDelay, jittered: jittered)
     }
 
+
+    // MARK: - Usage history
+    //
+    // Every successful poll leaves a small numeric trace behind, which is what
+    // burn rate, weekly projection and anomaly detection will read. All of it is
+    // fire-and-forget: the history is a by-product of showing usage, so a slow
+    // or failed write must never delay — or be visible in — the UI.
+
+    /// Trims the file to the retention window once per launch. Doing it here
+    /// rather than on every write keeps the cost to a single query at startup.
+    private func pruneSnapshotHistory() {
+        guard let snapshotStore else { return }
+        Task.detached(priority: .utility) {
+            try? await snapshotStore.pruneExpired()
+        }
+    }
+
+    /// Claude reports two windows per reading, so one poll contributes two
+    /// samples — both sharing the reading's single raw payload, which the store
+    /// dedupes by content hash so it costs one copy, not two.
+    private func claudeSamples(from usage: ClaudeUsage) -> [UsageSample] {
+        [
+            UsageSample(
+                provider: .claude,
+                kind: .session,
+                capturedAt: usage.observedAt,
+                percentUsed: usage.session.percentUsed,
+                resetsAt: usage.session.resetsAt
+            ),
+            UsageSample(
+                provider: .claude,
+                kind: .weekly,
+                capturedAt: usage.observedAt,
+                percentUsed: usage.weeklyAllModels.percentUsed,
+                resetsAt: usage.weeklyAllModels.resetsAt
+            )
+        ]
+    }
+
+    /// Writes this poll's samples, *then* recomputes the forecasts.
+    ///
+    /// The ordering is the point. Persisting and forecasting used to be
+    /// independent fire-and-forget tasks, which raced: the forecast could read
+    /// the history a moment before the newest sample landed in it and quietly
+    /// project from stale data. One serialized task removes the race entirely,
+    /// and it all still happens off the main thread.
+    private func persistAndForecast(claude: ClaudeUsage?, cursor: CursorUsage?) {
+        let claudeWrite = claude.map { (claudeSamples(from: $0), $0.rawPayload) }
+        let cursorWrite = cursor.map { usage in
+            (
+                [UsageSample(
+                    provider: .cursor,
+                    kind: .total,
+                    capturedAt: usage.observedAt,
+                    percentUsed: usage.percentUsed,
+                    resetsAt: usage.resetsAt
+                )],
+                usage.rawPayload
+            )
+        }
+        let sessionResetsAt = session?.resetsAt
+        let weeklyResetsAt = weeklyAllModels?.resetsAt
+        let cursorResetsAt = self.cursor?.resetsAt
+        let store = snapshotStore
+        let engine = forecastEngine
+
+        Task { [weak self] in
+            if let store {
+                if let claudeWrite { _ = try? await store.record(claudeWrite.0, rawJSON: claudeWrite.1) }
+                if let cursorWrite { _ = try? await store.record(cursorWrite.0, rawJSON: cursorWrite.1) }
+            }
+            let forecasts = await engine.forecasts(
+                claudeSessionResetsAt: sessionResetsAt,
+                claudeWeeklyResetsAt: weeklyResetsAt,
+                cursorResetsAt: cursorResetsAt
+            )
+            await MainActor.run { self?.forecasts = forecasts }
+        }
+    }
 
     private static func isServerError(_ error: UsageError) -> Bool {
         if case .httpStatus(let code) = error {
@@ -306,9 +426,51 @@ final class UsageModel: ObservableObject {
         isLaunchAtLoginEnabled = LaunchAtLogin.isEnabled
     }
 
-    func setBadgeDisplayMode(_ mode: BadgeDisplayMode) {
-        badgeDisplayMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: Self.badgeDisplayModeKey)
+    // MARK: - Provider-agnostic surface
+    //
+    // The settings list and the connection rows iterate `ProviderRegistry` and
+    // ask these two questions, so they contain no provider names at all. These
+    // switches are the one place a new platform has to be wired in.
+
+    /// How a platform's credentials currently stand.
+    func connection(for id: ProviderID) -> ProviderConnectionStatus {
+        switch id {
+        case .claude:
+            if claudeNeedsReauth { return .sessionExpired }
+            if claudeSignedInViaApp { return .connected }
+            // Working on a Claude Code token we borrowed from disk. Usable, but
+            // worth offering a sign-in of our own so the app doesn't depend on
+            // another app staying installed.
+            if isClaudeConnected { return .connectedViaFallback("Via Claude Code") }
+            return .notConnected
+        case .cursor:
+            if cursorNeedsReauth { return .sessionExpired }
+            if isCursorConnected { return .connected }
+            return .notConnected
+        case .chatgpt, .gemini:
+            return .notConnected
+        }
+    }
+
+    /// Performs whatever the row's button offers for that platform.
+    func performConnectionAction(for id: ProviderID) {
+        switch (id, connection(for: id)) {
+        case (.claude, .connected): disconnectClaude()
+        case (.claude, _): connectClaude()
+        case (.cursor, .connected): disconnectCursor()
+        case (.cursor, _): connectCursor()
+        case (.chatgpt, _), (.gemini, _): break
+        }
+    }
+
+    /// Adds or removes a platform from the menu bar. The cap and the
+    /// never-empty rule live in `BadgeSelection`, so this can't violate them
+    /// however it's called.
+    func toggleBadgeProvider(_ id: ProviderID) {
+        let updated = badgeSelection.toggling(id)
+        guard updated != badgeSelection else { return }
+        badgeSelection = updated
+        UserDefaults.standard.set(updated.storageValue, forKey: Self.badgeSelectionKey)
     }
 
     func setRefreshIntervalOption(_ option: RefreshIntervalOption) {

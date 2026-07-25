@@ -35,11 +35,11 @@ private struct HudContentView: View {
     @State private var isHovering = false
 
     /// Anthropic's coral/terracotta brand tone.
-    private static let claudeBrand = Color(red: 0.851, green: 0.467, blue: 0.341)
+    private static let claudeBrand = ProviderRegistry.descriptor(.claude)?.brand ?? Color(red: 0.851, green: 0.467, blue: 0.341)
     private static let claudeGradient = LinearGradient(colors: [Color(red: 0.9, green: 0.5, blue: 0.3), Color(red: 0.8, green: 0.35, blue: 0.25)], startPoint: .leading, endPoint: .trailing)
     /// Cursor has no single dominant brand color; a cool blue keeps it
     /// visually distinct from Claude's warm tone.
-    private static let cursorBrand = Color(red: 0.298, green: 0.545, blue: 0.965)
+    private static let cursorBrand = ProviderRegistry.descriptor(.cursor)?.brand ?? Color(red: 0.298, green: 0.545, blue: 0.965)
     private static let cursorGradient = LinearGradient(colors: [Color(red: 0.3, green: 0.7, blue: 1.0), Color(red: 0.1, green: 0.4, blue: 0.9)], startPoint: .leading, endPoint: .trailing)
 
     var body: some View {
@@ -51,12 +51,12 @@ private struct HudContentView: View {
                     compact: true,
                     brandColor: Self.claudeBrand,
                     brandGradient: Self.claudeGradient,
-                    icon: AppIcon.icon(forAppNamed: "Claude", bundleID: "com.anthropic.claudefordesktop"),
+                    icon: ProviderRegistry.descriptor(.claude)?.icon,
                     inactive: !isHovering
                 )
             } else {
                 HStack(spacing: 10) {
-                    if let icon = AppIcon.icon(forAppNamed: "Claude", bundleID: "com.anthropic.claudefordesktop") {
+                    if let icon = ProviderRegistry.descriptor(.claude)?.icon {
                         Image(nsImage: icon)
                             .resizable()
                             .frame(width: 28, height: 28)
@@ -79,12 +79,12 @@ private struct HudContentView: View {
                     compact: true,
                     brandColor: Self.cursorBrand,
                     brandGradient: Self.cursorGradient,
-                    icon: AppIcon.icon(forAppNamed: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92"),
+                    icon: ProviderRegistry.descriptor(.cursor)?.icon,
                     inactive: !isHovering
                 )
             } else {
                 HStack(spacing: 10) {
-                    if let icon = AppIcon.icon(forAppNamed: "Cursor", bundleID: "com.todesktop.230313mzl4w4u92") {
+                    if let icon = ProviderRegistry.descriptor(.cursor)?.icon {
                         Image(nsImage: icon)
                             .resizable()
                             .frame(width: 28, height: 28)

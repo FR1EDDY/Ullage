@@ -16,6 +16,9 @@ struct UsageBarView: View {
     /// The app's real icon, looked up live from the installed app on disk.
     var icon: NSImage? = nil
     var inactive: Bool = false
+    /// Where this window is heading. Shown under the reset row, and never
+    /// without its confidence qualifier.
+    var forecast: ForecastLine? = nil
 
     private var color: Color {
         guard let brandColor else {
@@ -76,9 +79,44 @@ struct UsageBarView: View {
                     }
                 }
                 .frame(height: compact ? 6 : 7)
-                Text(ResetText.label(for: window.resetsAt))
+                // Countdown left, wall-clock right — the row already had the
+                // width, and the two answer different questions ("how long
+                // have I got" vs "what time is that").
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(ResetText.countdown(for: window.resetsAt))
+                    Spacer(minLength: 4)
+                    if let clock = ResetText.clock(for: window.resetsAt) {
+                        Text(clock)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+                // The forecast mirrors the reset row's two-column shape — the
+                // claim on the left, its qualifier on the right — so the card
+                // reads as one grid rather than a stack of unrelated lines.
+                if let forecast {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if forecast.isAlarming {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 8))
+                        }
+                        Text(forecast.text)
+                        Spacer(minLength: 4)
+                        if let chip = forecast.confidence.chip {
+                            Text(chip)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    // A runaway session shifts the accent rather than raising a
+                    // banner: it's a heads-up, not an error, and the calm of
+                    // this panel is worth more than a louder alert.
+                    .foregroundStyle(forecast.isAlarming ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .help(forecast.tooltip)
+                }
             }
         }
     }

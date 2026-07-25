@@ -2,7 +2,8 @@ import Foundation
 import Security
 
 /// Fetches whole-account Claude usage (shared across claude.ai, Claude Code,
-/// and Cowork) via one of two unofficial paths:
+/// and Cowork) via one of three unofficial paths, tried in order until one
+/// answers (see `resolveStrategies`):
 ///   - **Cookie** (in-app sign-in): the same two-step call the claude.ai
 ///     settings page itself makes — `GET /api/organizations` to find the
 ///     account's org id, then `GET /api/organizations/{id}/usage` — both
@@ -17,6 +18,12 @@ import Security
 ///     stores locally, read only from disk/Keychain and never persisted
 ///     elsewhere. Used automatically when no cookie has been set up, so
 ///     existing Claude Code users need do nothing.
+///   - **Rate-limit headers** (last resort): a minimal `POST /v1/messages`
+///     whose *response headers* carry `anthropic-ratelimit-unified-5h-*` and
+///     `-7d-*`. Unlike the other two this spends a token of real quota and may
+///     be refused outright on a subscription credential, so it only runs after
+///     both have failed — but when the usage endpoints change shape or the
+///     cookie dies, it is the one path that still produces numbers.
 ///
 /// Schema discovered by inspecting a live response on 2026-07-11. The
 /// response has many more fields than we use (`extra_usage`, `spend`,
@@ -76,6 +83,12 @@ actor ClaudeUsageProvider {
 
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let organizationsURL = URL(string: "https://claude.ai/api/organizations")!
+    private static let messagesURL = URL(string: "https://api.anthropic.com/v1/messages")!
+    /// The cheapest model we can address, asked for exactly one token. We want
+    /// the response *headers*, not the completion, so the body is irrelevant —
+    /// but it is a real request against a real quota, which is why the strategy
+    /// that sends it is last in the chain.
+    private static let probeModel = "claude-haiku-4-5-20251001"
     /// `uuid` comes off the wire, so this stays a plain optional rather than a
     /// force-unwrap — a malformed org id should degrade to a decoding failure,
     /// not crash the app.
@@ -146,7 +159,8 @@ actor ClaudeUsageProvider {
     /// guaranteed to make it worse. It ends the fetch and starts a cooldown
     /// instead.
     func fetch() async -> Result<ClaudeUsage, UsageError> {
-        guard let method = Self.resolveAuthMethod() else {
+        let strategies = Self.resolveStrategies()
+        guard !strategies.isEmpty else {
             return .failure(.missingCredentials)
         }
 
@@ -163,7 +177,7 @@ actor ClaudeUsageProvider {
         for attempt in 1...Self.maxAttempts {
             beginCooldown(Self.minimumRequestInterval)
 
-            switch await Self.attempt(method: method) {
+            switch await Self.attemptChain(strategies) {
             case .success(let usage):
                 cached = usage
                 ClaudeUsageCache.saveReading(usage)
@@ -185,30 +199,69 @@ actor ClaudeUsageProvider {
         return .failure(.network("Retry attempts exhausted"))
     }
 
-    private enum AuthMethod {
+    private enum Strategy {
         case cookie(sessionKey: String)
-        case bearer(Credentials)
+        case bearerUsage(Credentials)
+        case bearerRateLimitHeaders(Credentials)
     }
 
-    /// Prefers the cookie the user set up via in-app sign-in; falls back to a
-    /// Claude Code / desktop token on disk. Both reads are local (Keychain or
-    /// file), so this never blocks on the network.
-    private static func resolveAuthMethod() -> AuthMethod? {
+    /// Every path we can try this launch, cheapest and most trustworthy first.
+    ///
+    /// This used to return a *single* method, which meant a dead cookie made the
+    /// whole app fail even with a perfectly good Claude Code token sitting on
+    /// disk — the user saw "Reconnect" and had to act, for nothing. Returning
+    /// the full list lets `attemptChain` fall through instead. All three reads
+    /// are local (Keychain or file), so building this never blocks on network.
+    private static func resolveStrategies() -> [Strategy] {
+        var strategies: [Strategy] = []
         if let sessionKey = ClaudeCookieStore.loadSessionKey() {
-            return .cookie(sessionKey: sessionKey)
+            strategies.append(.cookie(sessionKey: sessionKey))
         }
         if let credentials = readCredentials() {
-            return .bearer(credentials)
+            strategies.append(.bearerUsage(credentials))
+            // Last: the only one that costs quota.
+            strategies.append(.bearerRateLimitHeaders(credentials))
         }
-        return nil
+        return strategies
     }
 
-    private static func attempt(method: AuthMethod) async -> AttemptResult {
-        switch method {
-        case .bearer(let credentials):
-            return await attemptBearer(credentials: credentials)
+    /// Tries each path until one produces numbers.
+    ///
+    /// The one failure that stops the chain dead is a **429**. Every other error
+    /// is a reason to try the next door; a rate limit is the server saying "you
+    /// are already asking too often", and knocking on a different door is the
+    /// single worst response to that. (Worst case when the machine is simply
+    /// offline: three strategies fail locally, three times over from the
+    /// caller's retry loop — nine failures that never reach a server.)
+    ///
+    /// If everything fails we report the *first* error, except that a
+    /// `sessionExpired` anywhere in the chain wins: it's the only failure the
+    /// user can act on, and the UI's Reconnect prompt hangs off it. Losing that
+    /// signal behind a later, vaguer error would strand a dead cookie forever.
+    private static func attemptChain(_ strategies: [Strategy]) async -> AttemptResult {
+        var firstFailure: AttemptResult?
+        var sawSessionExpired = false
+
+        for strategy in strategies {
+            let result = await attempt(strategy)
+            guard case .failure(let error, _) = result else { return result }
+            if case .rateLimited = error { return result }
+            if case .sessionExpired = error { sawSessionExpired = true }
+            if firstFailure == nil { firstFailure = result }
+        }
+
+        if sawSessionExpired { return .failure(.sessionExpired, retryAfter: nil) }
+        return firstFailure ?? .failure(.missingCredentials, retryAfter: nil)
+    }
+
+    private static func attempt(_ strategy: Strategy) async -> AttemptResult {
+        switch strategy {
         case .cookie(let sessionKey):
             return await attemptCookie(sessionKey: sessionKey)
+        case .bearerUsage(let credentials):
+            return await attemptBearer(credentials: credentials)
+        case .bearerRateLimitHeaders(let credentials):
+            return await attemptRateLimitHeaders(credentials: credentials)
         }
     }
 
@@ -253,7 +306,8 @@ actor ClaudeUsageProvider {
                 planName: planName(from: credentials.subscriptionType),
                 session: session,
                 weeklyAllModels: weekly,
-                observedAt: Date()
+                observedAt: Date(),
+                rawPayload: data
             )
             return .success(usage)
         } catch {
@@ -317,12 +371,150 @@ actor ClaudeUsageProvider {
                 planName: nil,
                 session: window(from: decoded.fiveHour, isActiveOverride: sessionActive),
                 weeklyAllModels: window(from: decoded.sevenDay, isActiveOverride: weeklyActive),
-                observedAt: Date()
+                observedAt: Date(),
+                rawPayload: data
             )
             return .success(usage)
         } catch {
             return .failure(.decoding(error.localizedDescription), retryAfter: nil)
         }
+    }
+
+    /// The last resort. Instead of asking a usage endpoint what the account has
+    /// spent, it makes the smallest possible *real* API call and reads the
+    /// answer off the response headers, which every `/v1/messages` reply carries:
+    ///
+    ///     anthropic-ratelimit-unified-5h-utilization: 42
+    ///     anthropic-ratelimit-unified-5h-reset:       1752600000
+    ///     anthropic-ratelimit-unified-7d-utilization: 17
+    ///     anthropic-ratelimit-unified-7d-reset:       1752945600
+    ///
+    /// Two honest caveats, both the reason this is third and not first:
+    ///   - it spends about one token of the user's actual quota per call, so it
+    ///     is a (negligible) cost rather than a free observation;
+    ///   - an OAuth subscription credential may simply be refused here, in which
+    ///     case we fail like any other strategy and nothing is lost.
+    ///
+    /// A **429 is treated as a success if the headers are present** — a rate
+    /// limit rejection still tells us the utilization, and that is precisely the
+    /// moment the user most wants the number.
+    private static func attemptRateLimitHeaders(credentials: Credentials) async -> AttemptResult {
+        var request = URLRequest(url: messagesURL, timeoutInterval: requestTimeout)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body: [String: Any] = [
+            "model": probeModel,
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "."]]
+        ]
+        guard let encoded = try? JSONSerialization.data(withJSONObject: body) else {
+            return .failure(.decoding("Could not encode rate-limit probe"), retryAfter: nil)
+        }
+        request.httpBody = encoded
+
+        let response: URLResponse
+        do {
+            (_, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            return .failure(.network(error.localizedDescription), retryAfter: nil)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            return .failure(.network("No HTTP response"), retryAfter: nil)
+        }
+
+        // Header names are case-insensitive on the wire; normalizing once here
+        // keeps the parser below a plain dictionary lookup — and keeps it a pure
+        // function that tests can drive without a network.
+        var headers: [String: String] = [:]
+        for (key, value) in http.allHeaderFields {
+            if let key = key as? String, let value = value as? String {
+                headers[key.lowercased()] = value
+            }
+        }
+
+        if let usage = usage(
+            fromRateLimitHeaders: headers,
+            planName: planName(from: credentials.subscriptionType),
+            observedAt: Date()
+        ) {
+            return .success(usage)
+        }
+
+        // No usable headers: fall back to reporting the status honestly.
+        let retryAfter = headers["retry-after"]
+            .flatMap(TimeInterval.init)
+            .flatMap { $0 > 0 ? $0 : nil }
+        if http.statusCode == 429 {
+            return .failure(.rateLimited(retryAfter: retryAfter), retryAfter: retryAfter)
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            return .failure(.sessionExpired, retryAfter: nil)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            return .failure(.httpStatus(http.statusCode), retryAfter: retryAfter)
+        }
+        return .failure(.decoding("No anthropic-ratelimit-unified headers on response"), retryAfter: nil)
+    }
+
+    /// Builds a reading out of the unified rate-limit headers, or `nil` if
+    /// neither utilization header is present. Pure, so it's unit-testable.
+    ///
+    /// `rawPayload` is the headers we used, as JSON — history keeps the same
+    /// kind of evidence for this path as it does for the other two.
+    static func usage(
+        fromRateLimitHeaders headers: [String: String],
+        planName: String?,
+        observedAt: Date
+    ) -> ClaudeUsage? {
+        let fiveHour = headers["anthropic-ratelimit-unified-5h-utilization"].flatMap(Double.init)
+        let sevenDay = headers["anthropic-ratelimit-unified-7d-utilization"].flatMap(Double.init)
+        guard fiveHour != nil || sevenDay != nil else { return nil }
+
+        // A single `-reset` (no window prefix) is the older shape; treat it as
+        // applying to the session window, which is the one it always described.
+        let fallbackReset = headers["anthropic-ratelimit-unified-reset"]
+        let sessionReset = resetDate(fromHeader: headers["anthropic-ratelimit-unified-5h-reset"] ?? fallbackReset)
+        let weeklyReset = resetDate(fromHeader: headers["anthropic-ratelimit-unified-7d-reset"])
+
+        let relevant = headers.filter { $0.key.hasPrefix("anthropic-ratelimit-") }
+        let rawPayload = try? JSONSerialization.data(withJSONObject: relevant, options: [.sortedKeys])
+
+        let sessionPercent = normalizedPercent(fiveHour)
+        let weeklyPercent = normalizedPercent(sevenDay)
+        return ClaudeUsage(
+            planName: planName,
+            session: UsageWindow(
+                percentUsed: sessionPercent,
+                resetsAt: sessionReset,
+                isActive: fiveHour != nil && sessionPercent > 0
+            ),
+            weeklyAllModels: UsageWindow(
+                percentUsed: weeklyPercent,
+                resetsAt: weeklyReset,
+                isActive: sevenDay != nil && weeklyPercent > 0
+            ),
+            observedAt: observedAt,
+            rawPayload: rawPayload
+        )
+    }
+
+    /// The reset headers have been seen both as a Unix timestamp and as an
+    /// RFC-3339 string, so accept either. A bare number small enough to predate
+    /// 2001 can't be an epoch, so it's read as "seconds from now" instead —
+    /// guessing wrong in that direction would put the reset boundary in 1970 and
+    /// make every window look permanently expired.
+    static func resetDate(fromHeader value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+        if let number = Double(value) {
+            return number > 1_000_000_000
+                ? Date(timeIntervalSince1970: number)
+                : Date().addingTimeInterval(number)
+        }
+        return FlexibleISO8601.date(from: value)
     }
 
     /// The org id is stable for an account, so this round trip only happens
@@ -384,6 +576,11 @@ actor ClaudeUsageProvider {
     /// checking `value <= 1` misreads exactly 1% as 100%, so just clamp.
     static func normalizedPercent(_ value: Double?) -> Double {
         guard let value else { return 0 }
+        // A clamp does not clamp NaN — every comparison against it is false, so
+        // `min(max(nan, 0), 100)` is still NaN, and a NaN percentage reaches the
+        // database, the forecasts, and eventually an `Int(...)` conversion that
+        // traps. Non-finite input is treated as no reading at all.
+        guard value.isFinite else { return 0 }
         return min(max(value, 0), 100)
     }
 
