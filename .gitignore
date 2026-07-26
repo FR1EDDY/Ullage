@@ -2,5 +2,13 @@
 .swiftpm/
 *.xcodeproj
 .DS_Store
-"Apple Style Guide.pdf"
-.vscode/le
+# No quoting in .gitignore — spaces are literal, and quotes would be matched
+# as part of the filename.
+Apple Style Guide.pdf
+.vscode/
+
+# Packaging output — rebuilt by Scripts/package_app.sh, never committed.
+dist/
+
+# Local agent + editor config
+.claude/

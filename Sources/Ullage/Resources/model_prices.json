@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-25",
+  "note": "US dollars per million tokens. Cache rates follow Anthropic's published multipliers on the input rate: read = 0.1x, 5-minute write = 1.25x, 1-hour write = 2x. Drop a file with this same shape at ~/Library/Application Support/Ullage/model_prices.json to override or extend this table; entries there win per-model.",
+  "models": {
+    "claude-fable-5": {
+      "inputPerMTok": 10.0,
+      "outputPerMTok": 50.0,
+      "cacheWrite5mPerMTok": 12.5,
+      "cacheWrite1hPerMTok": 20.0,
+      "cacheReadPerMTok": 1.0
+    },
+    "claude-mythos-5": {
+      "inputPerMTok": 10.0,
+      "outputPerMTok": 50.0,
+      "cacheWrite5mPerMTok": 12.5,
+      "cacheWrite1hPerMTok": 20.0,
+      "cacheReadPerMTok": 1.0
+    },
+    "claude-opus-5": {
+      "inputPerMTok": 5.0,
+      "outputPerMTok": 25.0,
+      "cacheWrite5mPerMTok": 6.25,
+      "cacheWrite1hPerMTok": 10.0,
+      "cacheReadPerMTok": 0.5
+    },
+    "claude-opus-4-8": {
+      "inputPerMTok": 5.0,
+      "outputPerMTok": 25.0,
+      "cacheWrite5mPerMTok": 6.25,
+      "cacheWrite1hPerMTok": 10.0,
+      "cacheReadPerMTok": 0.5
+    },
+    "claude-opus-4-7": {
+      "inputPerMTok": 5.0,
+      "outputPerMTok": 25.0,
+      "cacheWrite5mPerMTok": 6.25,
+      "cacheWrite1hPerMTok": 10.0,
+      "cacheReadPerMTok": 0.5
+    },
+    "claude-opus-4-6": {
+      "inputPerMTok": 5.0,
+      "outputPerMTok": 25.0,
+      "cacheWrite5mPerMTok": 6.25,
+      "cacheWrite1hPerMTok": 10.0,
+      "cacheReadPerMTok": 0.5
+    },
+    "claude-sonnet-5": {
+      "inputPerMTok": 3.0,
+      "outputPerMTok": 15.0,
+      "cacheWrite5mPerMTok": 3.75,
+      "cacheWrite1hPerMTok": 6.0,
+      "cacheReadPerMTok": 0.3,
+      "promotionalUntil": "2026-08-31",
+      "promotional": {
+        "inputPerMTok": 2.0,
+        "outputPerMTok": 10.0,
+        "cacheWrite5mPerMTok": 2.5,
+        "cacheWrite1hPerMTok": 4.0,
+        "cacheReadPerMTok": 0.2
+      }
+    },
+    "claude-sonnet-4-6": {
+      "inputPerMTok": 3.0,
+      "outputPerMTok": 15.0,
+      "cacheWrite5mPerMTok": 3.75,
+      "cacheWrite1hPerMTok": 6.0,
+      "cacheReadPerMTok": 0.3
+    },
+    "claude-haiku-4-5": {
+      "inputPerMTok": 1.0,
+      "outputPerMTok": 5.0,
+      "cacheWrite5mPerMTok": 1.25,
+      "cacheWrite1hPerMTok": 2.0,
+      "cacheReadPerMTok": 0.1
+    }
+  }
+}

@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "UsageBar",
+    name: "Ullage",
     platforms: [
         .macOS(.v13)
     ],
     targets: [
         .executableTarget(
-            name: "UsageBar",
-            path: "Sources/UsageBar",
+            name: "Ullage",
+            path: "Sources/Ullage",
             // The pricing table ships as data rather than code so it can be
             // corrected without a rebuild. `ModelPricing` locates it by
             // searching known paths rather than through `Bundle.module`, which
@@ -17,9 +17,9 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         .testTarget(
-            name: "UsageBarTests",
-            dependencies: ["UsageBar"],
-            path: "Tests/UsageBarTests"
+            name: "UllageTests",
+            dependencies: ["Ullage"],
+            path: "Tests/UllageTests"
         )
     ]
 )
