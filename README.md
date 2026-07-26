@@ -16,19 +16,19 @@
   macOS 13+ &nbsp;|&nbsp; ~1.5 MB download &nbsp;|&nbsp; Native Swift/SwiftUI &nbsp;|&nbsp; No dependencies
 </p>
 
-Claude and Cursor both tell you how much you have left, in two different places, in their own terms, and only when you go looking. Ullage puts both in the menu bar, converts them into the same shape, and adds the part neither provides: whether your current pace runs out before the window resets.
+Claude and Cursor show your personal active usage, but checking those pages while you work costs you time. So I made Ullage: usage, costs, and forecasting in the menu bar, which cuts distractions when you're focused.
 
-*Ullage* is the unused space left in a container — how much room you still have. That is what the meters measure.
+*Ullage* is the empty space left in a container — how much room you still have. That's what the meters are measuring.
 
 ```
 ◍ 21%   ◆ 18%
 ```
 
-The badge shows each platform's own app icon, flattened to a monochrome stencil, next to its percentage used.
+The badge uses each app's real icon, flattened into a monochrome stencil, next to the % used.
 
 ---
 
-## See it in action
+## How it looks
 
 <p align="center">
   <video src="docs/demo.mp4" width="360" controls playsinline>
@@ -50,18 +50,13 @@ The badge shows each platform's own app icon, flattened to a monochrome stencil,
 
 ### DMG
 
-1. Download the latest DMG from [Releases](https://github.com/FR1EDDY/Ullage/releases/latest).
+1. Grab the latest DMG from [Releases](https://github.com/FR1EDDY/Ullage/releases/latest).
 2. Open it and drag **Ullage** into Applications.
 
-The build is ad-hoc signed rather than notarised — a deliberate choice, since notarisation requires a paid Apple Developer account. The cost of that choice lands on first launch: macOS will say the developer cannot be verified.
+This build is ad-hoc signed, not notarised.
 
-**Right-click the app → Open → Open.** Once. It launches normally after that.
+**Right-click the app → Open → Open.** Just once. After that it opens normally.
 
-Same thing from the terminal, if you prefer:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Ullage.app
-```
 
 ### Homebrew
 
@@ -69,43 +64,40 @@ xattr -dr com.apple.quarantine /Applications/Ullage.app
 brew install --cask fr1eddy/ullage/ullage
 ```
 
-Homebrew strips the quarantine flag itself, so the Gatekeeper dance above does not apply to this path.
-
 ---
 
 ## What it does
 
-Ullage lives in the menu bar and tracks two things at once:
+Ullage lives in the menu bar and tracks two things:
 
-- **Claude** — the 5-hour session window and the 7-day weekly window
-- **Cursor** — the monthly billing cycle
+- **Claude** — 5-hour session window + 7-day weekly window
+- **Cursor** — monthly billing cycle
 
-Open the panel and each window gets a meter, a reset time in your own clock, and a forecast line stated as a consequence rather than a rate: *on pace to run out about 55 minutes before this window resets*. The raw burn rate stays in the tooltip.
+Open the panel and each window gets a meter, a reset time on your local clock, and a forecast that says what it actually means — like *on pace to run out about 55 minutes before this window resets*. The burn rate itself is tucked in the tooltip.
 
-The `$` button in the footer opens the cost panel: today and the last 30 days, a daily chart, spend broken out by project, what prompt caching actually saved or cost you, and Cursor's cycle spend alongside it.
+Hit `$` in the footer for the cost panel: today, last 30 days, a daily chart, spend by project, whether prompt caching actually saved you money or not, plus Cursor's cycle spend next to it.
 
-Other things in the footer: refresh, a floating always-on-top HUD you can leave in a corner, settings, quit.
+Also in the footer: refresh, a floating always-on-top HUD if you want numbers in a corner, settings, quit.
 
-If you already use Claude Code, Claude usage often works with no setup at all.
+If you already use Claude Code, Claude usage usually just works with zero setup.
 
 ### Connecting an account
 
-Click **Connect** on a platform's card and the real login page opens in an embedded window. You sign in on the genuine site; the app lifts the session cookie into the Keychain when it appears. No scripts, no hand-pasted cookies.
+Click **Connect** on a card and the real login page opens in a small window. You sign in on the actual site; Ullage grabs the session cookie into Keychain when it shows up. No scripts, no copy-pasting cookies by hand.
 
 ### Settings
 
 - **Launch at login**
-- **Refresh interval** — 5, 10 or 15 minutes. Claude's own rate limits still slow polling when they need to.
-- **Menu bar** — which platforms show a percentage up top. Two maximum; past that the bar gets crowded.
-- **Connections** — connect or sign out per platform.
+- **Refresh interval** — 5, 10, or 15 minutes. Claude's rate limits can still slow things down when they need to.
+- **Menu bar** — which platforms get a % up top. Cap is two; more than that gets messy.
+- **Connections** — connect / sign out per platform.
 
-ChatGPT and Gemini are listed in the app as planned, marked as such rather than hidden.
+ChatGPT, Gemini, and Kimi are in the list as planned.
 
 ---
 
 ## How it works
 
-You should not have to read `Sources/` to understand the shape of the app. This section is the map.
 
 ### Architecture
 
@@ -140,27 +132,27 @@ flowchart LR
 | Forecasting | `Analytics/` | Burn rate, projections, anomaly — pure functions |
 | UI | `Views/` | Main panel, cost panel, settings, HUD, login window |
 
-Adding a platform is meant to be a listing change: one entry in `ProviderRegistry`, a provider file, a case in `UsageModel.connection(for:)`. Views iterate the registry instead of naming Claude and Cursor.
+Adding another platform is supposed to be boring: one row in `ProviderRegistry`, a provider file, a case in `UsageModel.connection(for:)`. The views just loop the registry instead of hardcoding Claude and Cursor everywhere.
 
 ### Where the numbers come from
 
-**Claude usage** — three paths, tried in order:
+**Claude usage** — three paths, in order:
 
-1. An in-app sign-in cookie (the same one claude.ai's own settings page uses)
-2. A Claude Code token already on disk or in the Keychain
-3. `anthropic-ratelimit-*` response headers from a minimal `api.anthropic.com` probe
+1. Cookie from in-app sign-in (same one claude.ai settings uses)
+2. Claude Code token already on disk / Keychain
+3. `anthropic-ratelimit-*` headers from a tiny `api.anthropic.com` probe
 
-**Claude cost** — read entirely offline from `~/.claude/projects/**/*.jsonl`. Token counts and models are priced from a bundled table (`Sources/Ullage/Resources/model_prices.json`). Unknown models show as *unpriced*, never as $0. Drop a file of the same shape at `~/Library/Application Support/Ullage/model_prices.json` to override or extend it — entries there win per model.
+**Claude cost** — fully offline from `~/.claude/projects/**/*.jsonl`. Tokens get priced from a bundled table (`Sources/Ullage/Resources/model_prices.json`). Unknown models show as *unpriced*, never $0 — a fake zero is worse than a missing number. Want custom rates? Drop the same shape at `~/Library/Application Support/Ullage/model_prices.json`. Entries there win.
 
-**Cursor** — one authenticated call to `cursor.com/api/usage-summary`, the same endpoint the Cursor dashboard uses. Usage and spend both come from that single request.
+**Cursor** — one authenticated hit to `cursor.com/api/usage-summary`, same endpoint their dashboard uses. Usage and spend both come from that one response.
 
 ### Forecasting
 
-Every successful poll writes a snapshot to SQLite. `ForecastEngine` loads recent history and hands it to small pure functions in `Analytics/`:
+Every good poll writes a snapshot to SQLite. `ForecastEngine` pulls recent history and runs it through small pure functions in `Analytics/`:
 
-- **Burn rate** — percent-points consumed per hour
-- **Session / window projection** — whether you finish early, on time, or with room left
-- **Anomaly** — a runaway-session flag when burn breaks from your recent baseline
+- **Burn rate** — % points per hour
+- **Session / window projection** — finish early, on time, or with room left
+- **Anomaly** — flags a runaway session when burn looks nothing like your recent baseline
 
 ```mermaid
 flowchart LR
@@ -172,7 +164,7 @@ flowchart LR
 
 ### Privacy and what touches the network
 
-No telemetry. No analytics. No Ullage account. Nothing leaves your machine except requests to the providers you are already signed in to.
+No telemetry. No analytics. No Ullage account. The only network calls are to the providers you're already signed into.
 
 | Host | Why |
 |---|---|
@@ -180,14 +172,14 @@ No telemetry. No analytics. No Ullage account. Nothing leaves your machine excep
 | `api.anthropic.com` | Usage endpoint; optional 1-token probe if the other Claude paths fail |
 | `cursor.com` | Usage summary; the sign-in window itself |
 
-Credentials live in the macOS Keychain only. They are never logged, never written to disk in plaintext, and never sent anywhere but the provider they belong to.
+Credentials stay in macOS Keychain. Not logged, not sitting in plaintext on disk, not sent anywhere except the provider they belong to.
 
-On disk, under `~/Library/Application Support/Ullage/`:
+On disk under `~/Library/Application Support/Ullage/`:
 
-- `usage.sqlite` — usage percentages over time, pruned to 180 days
-- `cost-cache.json` — parsed token counts, so a relaunch does not re-read large transcript trees
+- `usage.sqlite` — % over time, kept for ~180 days
+- `cost-cache.json` — parsed token counts so relaunch doesn't re-chew giant transcript trees
 
-To remove everything, including the stored credentials:
+Nuke everything, including credentials:
 
 ```sh
 rm -rf ~/Library/Application\ Support/Ullage
@@ -196,27 +188,27 @@ security delete-generic-password -s com.ullage.cursor -a cursor
 security delete-generic-password -s com.ullage.cursor -a claude-session
 ```
 
-Both credentials sit under the one `com.ullage.cursor` service, on separate accounts — a naming wart from when Cursor was the only provider. `brew uninstall --zap --cask ullage` covers the files, but never the Keychain items; Homebrew cannot touch those.
+Both credentials live under one Keychain service (`com.ullage.cursor`) on separate accounts — leftover naming from when Cursor was the only provider. `brew uninstall --zap --cask ullage` cleans the files; it can't touch Keychain, so do that yourself.
 
 ---
 
 ## Troubleshooting
 
-**Claude shows `…` and never resolves.** No credential was found on any of the three paths. Click **Connect** on the Claude card and sign in.
+**Claude shows `…` and never resolves.** None of the three credential paths worked. Hit **Connect** on the Claude card and sign in.
 
-**Cursor shows `—`.** Not connected, or the session cookie expired. Sign out and connect again.
+**Cursor shows `—`.** Not connected, or the cookie died. Sign out and connect again.
 
-**Refresh is greyed out.** Claude rate-limited the last poll; the button re-enables when the cooldown passes. Its tooltip says so.
+**Refresh is greyed out.** Claude rate-limited the last poll. It comes back when cooldown ends — tooltip says when.
 
-**Some cost lines say *unpriced*.** The model is not in the pricing table. Add it via the override file above.
+**Some cost lines say *unpriced*.** Model isn't in the pricing table. Add it with the override file above.
 
-**Nothing appears in the menu bar.** Ullage is `LSUIElement` — no Dock icon and no app-switcher entry by design. If the bar is full, macOS hides items silently; quit something else up there and relaunch.
+**Nothing in the menu bar.** Ullage is `LSUIElement` on purpose — no Dock icon, no app switcher. If the bar is packed, macOS just hides things. Quit something else up there and relaunch.
 
 ---
 
 ## Build from source
 
-Requires macOS 13+ and a Swift 5.9 toolchain. No third-party dependencies — SQLite and CryptoKit come from the system, which is why the download stays around 1.5 MB.
+Needs macOS 13+ and Swift 5.9. No third-party deps — SQLite and CryptoKit are already on the system, which is why the download stays around 1.5 MB.
 
 ```sh
 swift build
@@ -225,16 +217,16 @@ Scripts/package_app.sh          # universal .app + DMG into dist/
 Scripts/package_app.sh --arch arm64 --no-dmg   # faster local loop
 ```
 
-CI runs build, tests, and the packaging script on every push, and verifies the assembled bundle: `LSUIElement` set, pricing table present, ad-hoc signature valid, both architectures fat.
+CI builds, tests, and packages on every push, and checks the bundle: `LSUIElement` set, pricing table present, ad-hoc signature valid, fat binary for both arches.
 
-To cut a release (needs an authenticated `gh`):
+To cut a release (needs authenticated `gh`):
 
 ```sh
 echo "0.2.0" > VERSION
 Scripts/release.sh
 ```
 
-`VERSION` is the single source of truth — the tag, the bundle and the cask all read from it. The script tags, publishes the GitHub release, and prints the `version` and `sha256` to paste into the cask in the `homebrew-ullage` tap. It deliberately does not push to the tap itself.
+`VERSION` is the source of truth for the tag, the app bundle, and the cask. The script tags, publishes the GitHub release, and prints the `version` + `sha256` for you to paste into the `homebrew-ullage` tap. It does **not** push the tap for you.
 
 ---
 
