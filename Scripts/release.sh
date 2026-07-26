@@ -40,7 +40,7 @@ gh release create "$TAG" "$DMG" \
 
 **Install**
 
-    brew install --cask ullage/ullage/ullage
+    brew install --cask fr1eddy/ullage/ullage
 
 Or download the DMG below.
 

@@ -6,16 +6,16 @@
 #
 # Once the tap exists, install is one command:
 #
-#     brew install --cask ullage/ullage/ullage
+#     brew install --cask fr1eddy/ullage/ullage
 #
 cask "ullage" do
   version "0.1.0"
   sha256 "REPLACE_AFTER_FIRST_RELEASE"
 
-  url "https://github.com/REPLACE_OWNER/Ullage/releases/download/v#{version}/Ullage-#{version}.dmg"
+  url "https://github.com/FR1EDDY/Ullage/releases/download/v#{version}/Ullage-#{version}.dmg"
   name "Ullage"
   desc "Menu-bar usage and cost tracking for Claude and Cursor"
-  homepage "https://github.com/REPLACE_OWNER/Ullage"
+  homepage "https://github.com/FR1EDDY/Ullage"
 
   depends_on macos: ">= :ventura"
 
