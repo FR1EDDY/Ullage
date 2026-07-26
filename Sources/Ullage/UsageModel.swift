@@ -174,7 +174,9 @@ final class UsageModel: ObservableObject {
         timer?.invalidate()
         let interval = jittered ? delay * Double.random(in: 0.85...1.15) : delay
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            MainActor.assumeIsolated {
+                self?.refresh()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer

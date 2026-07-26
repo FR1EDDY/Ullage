@@ -92,7 +92,9 @@ final class LoginWebWindowController: NSObject, NSWindowDelegate {
     private func startPolling() {
         pollTimer?.invalidate()
         let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkCookies() }
+            MainActor.assumeIsolated {
+                self?.checkCookies()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
