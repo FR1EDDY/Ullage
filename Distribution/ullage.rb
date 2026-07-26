@@ -10,7 +10,7 @@
 #
 cask "ullage" do
   version "0.1.0"
-  sha256 "REPLACE_AFTER_FIRST_RELEASE"
+  sha256 "1a4f26d4f2242ed8ddccc9baa0755c6692f8151e72685544f7715c63424bd974"
 
   url "https://github.com/FR1EDDY/Ullage/releases/download/v#{version}/Ullage-#{version}.dmg"
   name "Ullage"

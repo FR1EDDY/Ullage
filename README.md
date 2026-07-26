@@ -65,13 +65,11 @@ xattr -dr com.apple.quarantine /Applications/Ullage.app
 
 ### Homebrew
 
-A cask is ready in [`Distribution/ullage.rb`](Distribution/ullage.rb) but the tap is not published yet, so this does not work today. Once the `FR1EDDY/homebrew-ullage` tap exists it will be one command:
-
 ```sh
 brew install --cask fr1eddy/ullage/ullage
 ```
 
-Homebrew strips the quarantine flag itself, so the Gatekeeper dance above will not apply to that path.
+Homebrew strips the quarantine flag itself, so the Gatekeeper dance above does not apply to this path.
 
 ---
 
@@ -198,7 +196,7 @@ security delete-generic-password -s com.ullage.cursor -a cursor
 security delete-generic-password -s com.ullage.cursor -a claude-session
 ```
 
-Both credentials sit under the one `com.ullage.cursor` service, on separate accounts — a naming wart from when Cursor was the only provider. `brew uninstall --zap --cask ullage` will cover the files once the tap is published, but never the Keychain items; Homebrew cannot touch those.
+Both credentials sit under the one `com.ullage.cursor` service, on separate accounts — a naming wart from when Cursor was the only provider. `brew uninstall --zap --cask ullage` covers the files, but never the Keychain items; Homebrew cannot touch those.
 
 ---
 
