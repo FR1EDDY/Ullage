@@ -17,7 +17,7 @@ cask "ullage" do
   desc "Menu-bar usage and cost tracking for Claude and Cursor"
   homepage "https://github.com/FR1EDDY/Ullage"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Ullage.app"
 
