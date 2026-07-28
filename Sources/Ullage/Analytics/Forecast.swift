@@ -59,6 +59,22 @@ struct ForecastLine: Equatable, Sendable {
     /// Set when the anomaly detector is firing, so the row can shift accent
     /// without a separate banner.
     var isAlarming: Bool = false
+    /// True for the "still gathering history" line, which is not a forecast at
+    /// all. It exists so a fresh install shows the same card shape as an
+    /// established one, and so the absence of a projection reads as *not yet*
+    /// rather than *not a feature*. Rendered without a confidence chip: there
+    /// is no claim here to qualify.
+    var isPlaceholder: Bool = false
+
+    /// Shown for a connected provider with no history behind it yet. Every
+    /// forecast in this app needs several completed windows before it means
+    /// anything, which is hours on a new machine.
+    static let gatheringHistory = ForecastLine(
+        text: "Learning your usage — forecast in a few hours",
+        detail: "Forecasts need a few completed windows before they mean anything. Nothing to do; this fills in on its own.",
+        confidence: .low,
+        isPlaceholder: true
+    )
 
     var tooltip: String {
         isAlarming

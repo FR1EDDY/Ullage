@@ -366,9 +366,11 @@ actor ClaudeUsageProvider {
             let weeklyActive = decoded.limits?.first(where: { $0.kind == "weekly_all" })?.isActive
             let usage = ClaudeUsage(
                 // The org/usage endpoint doesn't echo the plan tier the way the
-                // Claude Code credentials file does; leaving it nil just hides
-                // the plan badge rather than showing something wrong.
-                planName: nil,
+                // Claude Code credentials file does, so it comes from the
+                // organizations lookup this path already performs, cached at
+                // sign-in. Still nil if that response carried no tier — an
+                // absent badge beats a guessed one.
+                planName: ClaudeCookieStore.loadPlanName(),
                 session: window(from: decoded.fiveHour, isActiveOverride: sessionActive),
                 weeklyAllModels: window(from: decoded.sevenDay, isActiveOverride: weeklyActive),
                 observedAt: Date(),
@@ -533,12 +535,60 @@ actor ClaudeUsageProvider {
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
               let organizations = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              let uuid = organizations.first?["uuid"] as? String
+              let organization = organizations.first,
+              let uuid = organization["uuid"] as? String
         else {
             return nil
         }
         ClaudeCookieStore.saveOrganizationUUID(uuid)
+        // Free: the tier is in a response we were already making and throwing
+        // away. It's the only place the cookie path can learn the plan, since
+        // the usage endpoint every subsequent poll hits doesn't report one.
+        if let plan = planName(fromOrganization: organization) {
+            ClaudeCookieStore.savePlanName(plan)
+        }
         return uuid
+    }
+
+    /// Digs the subscription tier out of an `/api/organizations` entry.
+    ///
+    /// This response is undocumented and has carried the tier in different
+    /// shapes over time, so rather than bind to one key it tries the known ones
+    /// in order and gives up quietly. A missing badge is the status quo; a
+    /// *wrong* badge would be worse than either.
+    static func planName(fromOrganization organization: [String: Any]) -> String? {
+        // Newer shape: an explicit tier string.
+        for key in ["subscription_type", "rate_limit_tier", "billing_type"] {
+            if let raw = organization[key] as? String, let name = planName(from: normalise(tier: raw)) {
+                return name
+            }
+        }
+        // Older shape: capability flags such as `claude_pro` / `claude_max`.
+        if let capabilities = organization["capabilities"] as? [String] {
+            for capability in capabilities where capability.hasPrefix("claude_") {
+                let tier = String(capability.dropFirst("claude_".count))
+                // `claude_pro` is a tier; `claude_1p` and friends are feature
+                // flags that happen to share the prefix.
+                if ["pro", "max", "team", "enterprise", "free"].contains(tier) {
+                    return planName(from: tier)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Tier strings arrive in several house styles (`claude_pro`, `pro_2025`,
+    /// `default`). Reduce to the bare word so `planName(from:)` renders the
+    /// same badge text as the Claude Code credentials path does.
+    private static func normalise(tier raw: String) -> String {
+        let stripped = raw
+            .replacingOccurrences(of: "claude_", with: "")
+            .split(separator: "_")
+            .first
+            .map(String.init) ?? raw
+        // The endpoint says "default" where it means an unsubscribed account;
+        // badging that as "Default" would be noise.
+        return ["default", "none", "", "standard"].contains(stripped.lowercased()) ? "" : stripped
     }
 
     /// How long to wait before retrying, or `nil` if this error shouldn't be
@@ -647,6 +697,7 @@ actor ClaudeUsageProvider {
 enum ClaudeCookieStore {
     private static let keychainAccount = "claude-session"
     private static let orgUUIDKey = "claude.orgUUID"
+    private static let planNameKey = "claude.orgPlanName"
 
     static func loadSessionKey() -> String? {
         KeychainStore.load(account: keychainAccount)
@@ -671,6 +722,19 @@ enum ClaudeCookieStore {
 
     static func clearOrganizationUUID() {
         UserDefaults.standard.removeObject(forKey: orgUUIDKey)
+        UserDefaults.standard.removeObject(forKey: planNameKey)
+    }
+
+    /// Cached beside the org id because it comes from the same response and is
+    /// just as stable. Without this the plan badge would be blank for everyone
+    /// who signed in through the app rather than via Claude Code, since the
+    /// usage endpoint the polls actually hit doesn't carry a tier.
+    static func loadPlanName() -> String? {
+        UserDefaults.standard.string(forKey: planNameKey)
+    }
+
+    static func savePlanName(_ name: String) {
+        UserDefaults.standard.set(name, forKey: planNameKey)
     }
 }
 

@@ -105,16 +105,6 @@ struct CostView: View {
 
     @ViewBuilder
     private func card(@ViewBuilder _ content: () -> some View) -> some View {
-        content()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-            )
+        content().cardStyle()
     }
 }

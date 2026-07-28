@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+struct HudHoverState {
+    var card: Bool
+    var closeButton: Bool
+
+    var isInteractive: Bool { card || closeButton }
+}
+
 /// Non-activating, always-on-top panel that mirrors the same `UsageModel`
 /// as the dropdown — it never fetches on its own.
 private final class HudPanel: NSPanel {
@@ -32,7 +39,8 @@ private final class HudPanel: NSPanel {
 /// the dropdown's cards, just as one shared block instead of two.
 private struct HudContentView: View {
     @ObservedObject var model: UsageModel
-    @State private var isHovering = false
+    @State private var isHoveringCard = false
+    @State private var isHoveringCloseButton = false
 
     /// Anthropic's coral/terracotta brand tone.
     private static let claudeBrand = ProviderRegistry.descriptor(.claude)?.brand ?? Color(red: 0.851, green: 0.467, blue: 0.341)
@@ -41,6 +49,10 @@ private struct HudContentView: View {
     /// visually distinct from Claude's warm tone.
     private static let cursorBrand = ProviderRegistry.descriptor(.cursor)?.brand ?? Color(red: 0.298, green: 0.545, blue: 0.965)
     private static let cursorGradient = LinearGradient(colors: [Color(red: 0.3, green: 0.7, blue: 1.0), Color(red: 0.1, green: 0.4, blue: 0.9)], startPoint: .leading, endPoint: .trailing)
+
+    private var hoverState: HudHoverState {
+        HudHoverState(card: isHoveringCard, closeButton: isHoveringCloseButton)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -52,7 +64,7 @@ private struct HudContentView: View {
                     brandColor: Self.claudeBrand,
                     brandGradient: Self.claudeGradient,
                     icon: ProviderRegistry.descriptor(.claude)?.icon,
-                    inactive: !isHovering
+                    inactive: !hoverState.isInteractive
                 )
             } else {
                 HStack(spacing: 10) {
@@ -80,7 +92,7 @@ private struct HudContentView: View {
                     brandColor: Self.cursorBrand,
                     brandGradient: Self.cursorGradient,
                     icon: ProviderRegistry.descriptor(.cursor)?.icon,
-                    inactive: !isHovering
+                    inactive: !hoverState.isInteractive
                 )
             } else {
                 HStack(spacing: 10) {
@@ -103,34 +115,46 @@ private struct HudContentView: View {
         .padding(10)
         .frame(width: 200, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
-        .grayscale(isHovering ? 0.0 : 1.0)
-        .opacity(isHovering ? 1.0 : 0.6)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .grayscale(hoverState.isInteractive ? 0.0 : 1.0)
+        .opacity(hoverState.isInteractive ? 1.0 : 0.6)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
-                .opacity(isHovering ? 0.7 : 0.3)
+                .opacity(hoverState.isInteractive ? 0.7 : 0.3)
         )
+        // `Color.primary` rather than white: the HUD floats over the user's
+        // own windows, so in Light Mode a white hairline was invisible against
+        // everything it was meant to separate the card from.
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(isHovering ? Color.white.opacity(0.04) : Color.clear, lineWidth: 0.5)
+                .strokeBorder(hoverState.isInteractive ? Color.primary.opacity(0.08) : Color.clear, lineWidth: 0.5)
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.2)) {
-                isHovering = hovering
+                isHoveringCard = hovering
             }
         }
         .overlay(alignment: .topTrailing) {
-            if isHovering {
-                Button(action: { model.isHudVisible = false }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+            Button(action: { model.isHudVisible = false }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(hoverState.isInteractive ? .secondary : .tertiary)
+                    .padding(6)
+                    .background(Circle().fill(Color.black.opacity(isHoveringCloseButton ? 0.14 : 0.001)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+            .opacity(hoverState.isInteractive ? 1 : 0)
+            .allowsHitTesting(hoverState.isInteractive)
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHoveringCloseButton = hovering
                 }
-                .buttonStyle(.plain)
-                .padding(6)
             }
         }
-        .shadow(color: Color.black.opacity(isHovering ? 0.3 : 0.0), radius: 10, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(hoverState.isInteractive ? 0.3 : 0.0), radius: 10, x: 0, y: 4)
         .padding(15)
     }
 }

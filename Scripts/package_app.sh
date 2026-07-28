@@ -27,7 +27,23 @@ MIN_MACOS="13.0"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
-APP="$DIST/$APP_NAME.app"
+
+# The bundle is assembled and signed in a temp directory and only copied into
+# dist/ at the very end. This is not tidiness — it is the fix for a real,
+# intermittent packaging failure.
+#
+# If the repo lives anywhere a file provider manages (iCloud Drive's "Desktop &
+# Documents Folders" sync is the usual one), that provider re-applies
+# `com.apple.FinderInfo` to directories a second or two after `xattr -cr`
+# strips them. codesign refuses to touch a bundle carrying it — "resource fork,
+# Finder information, or similar detritus not allowed" — so whether signing
+# succeeded came down to which side won the race, and a losing run still
+# produced a DMG, one that other Macs reject outright as "damaged".
+#
+# $TMPDIR is never file-provider managed, so the race cannot occur there.
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/ullage-package.XXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT
+APP="$STAGE/$APP_NAME.app"
 
 ARCH_FLAGS=(--arch arm64 --arch x86_64)
 MAKE_DMG=1
@@ -48,9 +64,9 @@ BIN_DIR="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)"
 EXECUTABLE="$BIN_DIR/$APP_NAME"
 [[ -f "$EXECUTABLE" ]] || { echo "no executable at $EXECUTABLE" >&2; exit 1; }
 
-echo "==> Assembling $APP"
+echo "==> Assembling $APP_NAME.app"
 rm -rf "$DIST"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$DIST" "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$EXECUTABLE" "$APP/Contents/MacOS/$APP_NAME"
 
@@ -99,30 +115,55 @@ fi
 # across launches. Without a stable signature the app would re-prompt for
 # Keychain access on every update.
 echo "==> Ad-hoc signing"
-# `cp -R` carries extended attributes across, and codesign refuses to sign a
-# bundle containing them ("resource fork, Finder information, or similar
-# detritus not allowed"). Stripping them is not cosmetic — without this the
-# signing step fails outright.
+# `cp -R` carries extended attributes across from the build tree, and codesign
+# refuses to sign a bundle containing them ("resource fork, Finder information,
+# or similar detritus not allowed"). Stripping them is not cosmetic — without
+# this the signing step fails outright. It sticks here only because $STAGE sits
+# outside any synced tree; see the note on STAGE above.
 xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
-codesign --verify --deep --strict "$APP" && echo "    signature OK"
+
+# Deliberately NOT `codesign --verify ... && echo OK`. A command on the left of
+# `&&` is exempt from `set -e`, so that spelling silently swallowed a failed
+# verification: the script went on to build the DMG, printed "Done", and exited
+# 0 having produced an app that was never correctly signed. Verification is the
+# one check standing between a bad build and a release, so it has to be fatal.
+if ! codesign --verify --deep --strict "$APP"; then
+    echo "error: signature verification failed — refusing to package" >&2
+    exit 1
+fi
+echo "    signature OK"
 
 APP_SIZE="$(du -sh "$APP" | cut -f1 | tr -d ' ')"
-echo "==> $APP ($APP_SIZE)"
 
 if [[ "$MAKE_DMG" == "1" ]]; then
-    DMG="$DIST/$APP_NAME-$VERSION.dmg"
+    DMG="$STAGE/$APP_NAME-$VERSION.dmg"
     echo "==> Building DMG"
-    STAGE="$(mktemp -d)"
-    cp -R "$APP" "$STAGE/"
+    DMG_STAGE="$STAGE/dmg"
+    mkdir -p "$DMG_STAGE"
+    cp -R "$APP" "$DMG_STAGE/"
     # The Applications symlink is what makes "drag to install" obvious without
     # a background image or a custom window layout.
-    ln -s /Applications "$STAGE/Applications"
-    hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO -quiet "$DMG"
-    rm -rf "$STAGE"
-    echo "==> $DMG ($(du -sh "$DMG" | cut -f1 | tr -d ' '))"
+    ln -s /Applications "$DMG_STAGE/Applications"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" -ov -format UDZO -quiet "$DMG"
+fi
+
+# Only now does anything enter the repo. A DMG seals its contents at creation,
+# so the app a user installs is the verified one no matter what a file provider
+# does to the copies below afterwards. (It may well re-stamp FinderInfo on
+# dist/Ullage.app within seconds — harmless, but it means a later
+# `codesign --verify` against *that* copy can fail while the DMG is perfect.
+# Verify the DMG's contents, or a copy in /Applications, not this one.)
+echo "==> Copying to dist/"
+cp -R "$APP" "$DIST/"
+echo "==> $DIST/$APP_NAME.app ($APP_SIZE)"
+
+if [[ "$MAKE_DMG" == "1" ]]; then
+    cp "$DMG" "$DIST/"
+    FINAL_DMG="$DIST/$APP_NAME-$VERSION.dmg"
+    echo "==> $FINAL_DMG ($(du -sh "$FINAL_DMG" | cut -f1 | tr -d ' '))"
     echo
-    echo "    sha256: $(shasum -a 256 "$DMG" | cut -d' ' -f1)"
+    echo "    sha256: $(shasum -a 256 "$FINAL_DMG" | cut -d' ' -f1)"
 fi
 
 echo

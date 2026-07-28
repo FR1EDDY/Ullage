@@ -52,6 +52,39 @@ final class ClaudeUsageProviderTests: XCTestCase {
         XCTAssertNil(ClaudeUsageProvider.planName(from: ""))
     }
 
+    /// The in-app sign-in path can only learn the tier from the organizations
+    /// response, which is undocumented and has carried it under more than one
+    /// key. Whichever shape arrives must render the same badge text as the
+    /// Claude Code credentials path produces.
+    func testPlanNameFromOrganizationAcceptsKnownShapes() {
+        XCTAssertEqual(
+            ClaudeUsageProvider.planName(fromOrganization: ["subscription_type": "pro"]), "Pro"
+        )
+        XCTAssertEqual(
+            ClaudeUsageProvider.planName(fromOrganization: ["rate_limit_tier": "claude_max"]), "Max"
+        )
+        // Tier strings arrive suffixed in some responses.
+        XCTAssertEqual(
+            ClaudeUsageProvider.planName(fromOrganization: ["billing_type": "pro_2025"]), "Pro"
+        )
+        XCTAssertEqual(
+            ClaudeUsageProvider.planName(fromOrganization: ["capabilities": ["chat", "claude_max"]]), "Max"
+        )
+    }
+
+    /// A missing badge is the accepted outcome; a wrong one is not. Anything
+    /// this function can't confidently read as a tier has to come back nil.
+    func testPlanNameFromOrganizationRejectsNonTiers() {
+        XCTAssertNil(ClaudeUsageProvider.planName(fromOrganization: [:]))
+        XCTAssertNil(ClaudeUsageProvider.planName(fromOrganization: ["uuid": "abc"]))
+        // "default" means an unsubscribed account, not a plan called Default.
+        XCTAssertNil(ClaudeUsageProvider.planName(fromOrganization: ["subscription_type": "default"]))
+        // Feature flags share the `claude_` prefix with tier capabilities.
+        XCTAssertNil(
+            ClaudeUsageProvider.planName(fromOrganization: ["capabilities": ["claude_1p", "chat"]])
+        )
+    }
+
     /// Schema drift (a field renamed or removed) shouldn't throw — every
     /// field here is optional by design so a partial response still decodes.
     func testMissingFieldsDecodeGracefully() throws {

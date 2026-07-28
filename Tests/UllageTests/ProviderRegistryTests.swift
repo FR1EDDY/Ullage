@@ -153,4 +153,38 @@ final class ProviderRegistryTests: XCTestCase {
             XCTAssertFalse(ProviderRegistry.available.contains { $0.id == provider.id })
         }
     }
+
+    // MARK: - Branding
+
+    /// Branding comes from bundled artwork and nothing else — the installed
+    /// `Claude.app` / `Cursor.app` are never read.
+    ///
+    /// This is the regression that shipped. v0.1.0 carried no bundled copy at
+    /// all and resolved icons purely from disk, so on a Mac without both desktop
+    /// apps installed the panel, the HUD, Settings *and* the menu-bar badge
+    /// rendered with no branding whatsoever. Every icon call site is an
+    /// `if let`, so nothing threw and nothing logged — it just silently looked
+    /// broken on someone else's machine. Asserting the resource resolves is the
+    /// only thing that catches it before a user does.
+    func testEveryAvailableProviderResolvesBundledArtwork() {
+        for provider in ProviderRegistry.available {
+            XCTAssertNotNil(
+                ProviderIcon.image(for: provider.id),
+                "\(provider.displayName): no bundled icon — is Sources/Ullage/Resources committed?"
+            )
+            XCTAssertNotNil(
+                provider.icon,
+                "\(provider.displayName): descriptor resolved no icon"
+            )
+        }
+    }
+
+    /// Planned platforms ship no artwork yet, and must resolve to nil rather
+    /// than quietly borrowing another provider's mark.
+    func testPlannedProvidersResolveNoArtwork() {
+        for provider in ProviderRegistry.planned {
+            XCTAssertNil(ProviderIcon.image(for: provider.id), provider.displayName)
+            XCTAssertNil(provider.icon, provider.displayName)
+        }
+    }
 }

@@ -1,0 +1,47 @@
+<svg width="1200" height="400" viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#20242b"/>
+      <stop offset="100%" stop-color="#14161a"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#3fc7b0"/>
+      <stop offset="100%" stop-color="#3f8ec7"/>
+    </linearGradient>
+    <linearGradient id="glassStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a8afb8"/>
+      <stop offset="35%" stop-color="#7b828c"/>
+      <stop offset="65%" stop-color="#8b929c"/>
+      <stop offset="100%" stop-color="#a8afb8"/>
+    </linearGradient>
+    <clipPath id="capsuleClip">
+      <rect x="150" y="90" width="88" height="220" rx="44" ry="44"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1200" height="400" fill="url(#bg)"/>
+
+  <g clip-path="url(#capsuleClip)">
+    <rect x="157" y="90" width="10" height="220" fill="#ffffff" opacity="0.10"/>
+    <rect x="214" y="90" width="6" height="220" fill="#ffffff" opacity="0.06"/>
+
+    <path d="M150,193 C170,175 218,213 238,187 L238,310 L150,310 Z" fill="url(#fill)"/>
+    <path d="M150,200 C173,214 214,183 238,198 L238,310 L150,310 Z" fill="#2f6f95" opacity="0.35"/>
+    <path d="M150,193 C170,175 218,213 238,187" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.4"/>
+    <ellipse cx="172" cy="255" rx="13" ry="45" fill="#ffffff" opacity="0.12" transform="rotate(-18 172 255)"/>
+  </g>
+
+  <rect x="150" y="90" width="88" height="220" rx="44" ry="44"
+        fill="none" stroke="url(#glassStroke)" stroke-width="6" stroke-opacity="0.85"/>
+  <rect x="153" y="93" width="82" height="214" rx="41" ry="41"
+        fill="none" stroke="#ffffff" stroke-width="1" opacity="0.12"/>
+
+  <g stroke="#5b6470" stroke-width="4" stroke-linecap="round" opacity="0.6">
+    <line x1="167" y1="112" x2="182" y2="112"/>
+    <line x1="167" y1="136" x2="182" y2="136"/>
+    <line x1="167" y1="160" x2="182" y2="160"/>
+  </g>
+
+  <text x="300" y="225" font-family="Helvetica Neue, Arial, sans-serif" font-size="96" font-weight="600" fill="#f2f3f5" letter-spacing="1">Ullage</text>
+  <text x="303" y="270" font-family="Helvetica Neue, Arial, sans-serif" font-size="26" font-weight="400" fill="#9aa3ad" letter-spacing="2">A CALM MENU-BAR METER FOR AI USAGE LIMITS</text>
+</svg>

@@ -97,14 +97,14 @@ struct MenuContentView: View {
                                 confidence: $0.confidence,
                                 isAlarming: model.forecasts.anomalyFiring
                             )
-                        }
+                        } ?? .gatheringHistory
                     )
                     usageRow(
                         title: "Weekly · all models",
                         window: model.weeklyAllModels,
                         forecast: model.forecasts.claudeWeekly.map {
                             ForecastLine(text: $0.label, detail: $0.detail, confidence: $0.confidence)
-                        }
+                        } ?? .gatheringHistory
                     )
 
                     if let error = model.claudeError {
@@ -168,7 +168,7 @@ struct MenuContentView: View {
                         brandGradient: Self.cursorGradient,
                         forecast: model.forecasts.cursorCycle.map {
                             ForecastLine(text: $0.label, detail: $0.detail, confidence: $0.confidence)
-                        }
+                        } ?? .gatheringHistory
                     )
                     // The breakdown behind that blended total. A caption
                     // line rather than two more full bars — repeating the
@@ -237,18 +237,20 @@ struct MenuContentView: View {
                 }
                 .help(model.isHudVisible ? "Hide floating HUD" : "Show floating HUD")
 
-                // Shown only when there's spend to look at, so the button
-                // never opens an empty panel.
-                if CostView.hasAnySpend(model) {
-                    PillButton(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showingCost = true
-                        }
-                    }) { _ in
-                        Image(systemName: "dollarsign.circle")
+                // Always present, even with nothing to show. Hiding it made the
+                // footer a different shape on every machine, and it hid the
+                // feature from exactly the person who hadn't discovered it yet
+                // — `CostView` already opens with a written explanation of
+                // where Claude Code spend comes from, which is more use to a
+                // new user than a missing button.
+                PillButton(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showingCost = true
                     }
-                    .help("Cost")
+                }) { _ in
+                    Image(systemName: "dollarsign.circle")
                 }
+                .help("Cost")
 
                 PillButton(action: {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -340,16 +342,7 @@ struct MenuContentView: View {
 
     @ViewBuilder
     private func card(@ViewBuilder _ content: () -> some View) -> some View {
-        content()
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-            )
+        content().cardStyle()
     }
 
     /// Seconds until the provider will accept another request, or `nil` if it

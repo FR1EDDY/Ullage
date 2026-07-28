@@ -22,9 +22,6 @@ enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable {
 struct ProviderDescriptor: Identifiable, Sendable {
     let id: ProviderID
     let displayName: String
-    /// Name and bundle id used to find the real app icon on disk.
-    let appName: String
-    let bundleID: String
     let brand: Color
     let gradient: LinearGradient
     /// Whether this platform is actually implemented. Planned entries are
@@ -33,8 +30,22 @@ struct ProviderDescriptor: Identifiable, Sendable {
     /// honest about what "supported" means.
     let isAvailable: Bool
 
+    /// Always the artwork bundled with Ullage — never the copy on disk.
+    ///
+    /// This used to read the installed `Claude.app` / `Cursor.app` icon first
+    /// and fall back to the bundle, which was wrong in both directions. On a Mac
+    /// without either app installed there was nothing to read, so the panel, the
+    /// HUD, Settings and the menu-bar badge all rendered with no branding at all
+    /// (every call site is an `if let`, so the failure was silent). And when the
+    /// apps *were* installed we drew whatever happened to be on disk — a beta
+    /// build, a user's custom Finder icon, a vendor rebrand — straight into
+    /// `pureStencilMask()`, whose contrast curve is tuned for this specific
+    /// artwork and turns anything else into a blob.
+    ///
+    /// Reading one bundled file makes the app look identical on every machine,
+    /// which is the only version of this that's actually predictable.
     var icon: NSImage? {
-        AppIcon.icon(forAppNamed: appName, bundleID: bundleID)
+        ProviderIcon.image(for: id)
     }
 }
 
@@ -46,8 +57,6 @@ enum ProviderRegistry {
         ProviderDescriptor(
             id: .claude,
             displayName: "Claude",
-            appName: "Claude",
-            bundleID: "com.anthropic.claudefordesktop",
             // Anthropic's coral/terracotta brand tone.
             brand: Color(red: 0.851, green: 0.467, blue: 0.341),
             gradient: LinearGradient(
@@ -60,8 +69,6 @@ enum ProviderRegistry {
         ProviderDescriptor(
             id: .cursor,
             displayName: "Cursor",
-            appName: "Cursor",
-            bundleID: "com.todesktop.230313mzl4w4u92",
             // Cursor has no single dominant brand colour; a cool blue keeps it
             // visually distinct from Claude's warm tone.
             brand: Color(red: 0.298, green: 0.545, blue: 0.965),
@@ -75,8 +82,6 @@ enum ProviderRegistry {
         ProviderDescriptor(
             id: .chatgpt,
             displayName: "ChatGPT",
-            appName: "ChatGPT",
-            bundleID: "com.openai.chat",
             brand: Color(red: 0.06, green: 0.65, blue: 0.53),
             gradient: LinearGradient(
                 colors: [Color(red: 0.12, green: 0.75, blue: 0.62), Color(red: 0.04, green: 0.55, blue: 0.45)],
@@ -88,8 +93,6 @@ enum ProviderRegistry {
         ProviderDescriptor(
             id: .gemini,
             displayName: "Gemini",
-            appName: "Gemini",
-            bundleID: "com.google.gemini",
             brand: Color(red: 0.26, green: 0.52, blue: 0.96),
             gradient: LinearGradient(
                 colors: [Color(red: 0.36, green: 0.62, blue: 1.0), Color(red: 0.16, green: 0.42, blue: 0.86)],

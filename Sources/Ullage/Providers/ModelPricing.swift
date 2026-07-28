@@ -179,30 +179,9 @@ struct ModelPricing: Sendable {
         .appendingPathComponent("model_prices.json", isDirectory: false)
     }
 
-    /// Every place the bundled table might plausibly live, across `swift run`,
-    /// `swift test`, and a hand-assembled `.app`. Checked in order; the first
-    /// file that parses wins.
+    /// See `BundledResource` for why this doesn't go through `Bundle.module`.
     private static func bundledURL() -> URL? {
-        let name = "model_prices"
-        var candidates: [URL] = []
-
-        for bundle in [Bundle.main] + Bundle.allBundles {
-            if let direct = bundle.url(forResource: name, withExtension: "json") {
-                candidates.append(direct)
-            }
-            // SwiftPM emits `Ullage_Ullage.bundle` beside the built
-            // executable; a packaged .app copies the json into Resources/.
-            // The SwiftPM bundle is flat on a command-line build and wrapped in
-            // `Contents/Resources` when it's a real bundle, so try both.
-            for root in [bundle.resourceURL, bundle.bundleURL, bundle.bundleURL.deletingLastPathComponent()].compactMap({ $0 }) {
-                candidates.append(root.appendingPathComponent("\(name).json"))
-                let spm = root.appendingPathComponent("Ullage_Ullage.bundle", isDirectory: true)
-                candidates.append(spm.appendingPathComponent("\(name).json"))
-                candidates.append(spm.appendingPathComponent("Contents/Resources/\(name).json"))
-            }
-        }
-
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        BundledResource.url(named: "model_prices", extension: "json")
     }
 
     private static func loadEntries(at url: URL?) -> [String: PriceFile.Entry]? {

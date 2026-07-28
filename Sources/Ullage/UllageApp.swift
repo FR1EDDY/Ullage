@@ -56,18 +56,24 @@ extension NSImage {
 private struct BadgeLabel: View {
     @ObservedObject var model: UsageModel
 
-    /// Stencils are expensive to build and never change, so they're cut once
-    /// per provider and cached. Driven off the registry rather than named
-    /// constants, so a new platform needs no change here.
-    private static let stencils: [ProviderID: NSImage] = {
-        var result: [ProviderID: NSImage] = [:]
-        for descriptor in ProviderRegistry.available {
-            if let stencil = descriptor.icon?.pureStencilMask() {
-                result[descriptor.id] = stencil
-            }
-        }
-        return result
-    }()
+    /// Stencils are expensive to build, so they're cut once per provider and
+    /// cached. Driven off the registry rather than named constants, so a new
+    /// platform needs no change here.
+    ///
+    /// Memoised lazily rather than as a `static let` initialised in one shot:
+    /// the source icon can change under us (the user installs Cursor while the
+    /// app is running), and a one-shot initialiser would pin whatever was true
+    /// at first draw until relaunch.
+    @MainActor
+    private static var stencilCache: [ProviderID: NSImage] = [:]
+
+    @MainActor
+    private static func stencil(for id: ProviderID) -> NSImage? {
+        if let cached = stencilCache[id] { return cached }
+        guard let stencil = ProviderRegistry.descriptor(id)?.icon?.pureStencilMask() else { return nil }
+        stencilCache[id] = stencil
+        return stencil
+    }
 
     /// The percentage each provider contributes to the badge. This is the one
     /// place a new platform has to say what its headline number is.
@@ -94,7 +100,7 @@ private struct BadgeLabel: View {
                         .padding(.horizontal, 2)
                 }
                 HStack(spacing: 2) {
-                    if let icon = Self.stencils[id] {
+                    if let icon = Self.stencil(for: id) {
                         Image(nsImage: icon)
                             .resizable()
                             .renderingMode(.template)

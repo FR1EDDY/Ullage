@@ -1,7 +1,7 @@
 # Ullage
 
 <p align="center">
-  <strong>A calm macOS menu-bar meter for AI usage limits and cost</strong>
+  <img src="docs/images/banner.png" width="640" alt="Ullage — a calm menu-bar meter for AI usage limits and cost">
 </p>
 
 <p align="center">
@@ -233,3 +233,9 @@ Scripts/release.sh
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+Ullage is not affiliated with Anthropic or Anysphere. It shows the Claude and
+Cursor app icons to identify which service each card reports on — read from the
+installed app when it's present, and from a bundled copy of the same artwork
+when it isn't (`Scripts/refresh_provider_icons.sh`). Those icons are the
+property of their respective owners.

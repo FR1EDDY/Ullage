@@ -104,7 +104,10 @@ struct UsageMeterView: View {
                         }
                         Text(forecast.text)
                         Spacer(minLength: 4)
-                        if let chip = forecast.confidence.chip {
+                        // A placeholder makes no claim, so it gets no
+                        // confidence qualifier — "rough estimate" next to
+                        // "learning your usage" would be qualifying nothing.
+                        if !forecast.isPlaceholder, let chip = forecast.confidence.chip {
                             Text(chip)
                                 .foregroundStyle(.tertiary)
                         }
@@ -113,12 +116,19 @@ struct UsageMeterView: View {
                     // A runaway session shifts the accent rather than raising a
                     // banner: it's a heads-up, not an error, and the calm of
                     // this panel is worth more than a louder alert.
-                    .foregroundStyle(forecast.isAlarming ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(forecastStyle(forecast))
                     .lineLimit(1)
                     .help(forecast.tooltip)
                 }
             }
         }
+    }
+
+    /// Placeholders sit a step quieter than real forecasts so a card that's
+    /// still warming up doesn't compete with one that has something to say.
+    private func forecastStyle(_ forecast: ForecastLine) -> AnyShapeStyle {
+        if forecast.isAlarming { return AnyShapeStyle(.orange) }
+        return forecast.isPlaceholder ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary)
     }
 
     private var fraction: CGFloat {

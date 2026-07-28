@@ -51,6 +51,16 @@ jobs:
           # The pricing table must reach the bundle, or every model reads as
           # "unpriced" in the shipped app while tests still pass.
           test -f "$APP/Contents/Resources/model_prices.json"
+          # Provider icons are the *only* icon source since branding stopped
+          # reading the installed Claude.app / Cursor.app. If they don't reach
+          # the bundle the app still builds, still passes tests, and ships with
+          # no branding anywhere — which is exactly how v0.1.0 went out.
+          test -f "$APP/Contents/Resources/claude-icon.png"
+          test -f "$APP/Contents/Resources/cursor-icon.png"
+          # The app icon is copied conditionally by package_app.sh, so a missing
+          # Resources/AppIcon.icns degrades silently to a generic bundle icon.
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist"
           codesign --verify --deep --strict "$APP"
           lipo -archs "$APP/Contents/MacOS/Ullage"
 
