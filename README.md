@@ -16,33 +16,20 @@
   macOS 13+ &nbsp;|&nbsp; ~1.5 MB download &nbsp;|&nbsp; Native Swift/SwiftUI &nbsp;|&nbsp; No dependencies
 </p>
 
-Claude and Cursor show your personal active usage, but checking those pages while you work costs you time. So I made Ullage: usage, costs, and forecasting in the menu bar, which cuts distractions when you're focused.
+Checking Claude and Cursor usage pages breaks focus. Ullage keeps limits, spend, and forecasts in the menu bar so you can stay in flow.
 
-*Ullage* is the empty space left in a container — how much room you still have. That's what the meters are measuring.
+*Ullage* is the empty space left in a container — how much room you still have. That's what the meters measure.
 
-```
-◍ 21%   ◆ 18%
-```
-
-The badge uses each app's real icon, flattened into a monochrome stencil, next to the % used.
 
 ---
 
 ## How it looks
 
 <p align="center">
-  <video src="docs/demo.mp4" width="360" controls playsinline>
-    <a href="docs/demo.mp4">Watch the demo</a>
-  </video>
+  <img src="docs/images/demo.gif" width="320" alt="Ullage demo: menu bar badge opens into the usage panel with meters and forecasts">
 </p>
 
-<p align="center">
-  <img src="docs/images/main-panel.png" width="320" alt="Usage panel showing Claude and Cursor meters with forecasts">
-  &nbsp;&nbsp;
-  <img src="docs/images/cost-panel.png" width="320" alt="Cost panel showing spend, caching economics and per-project breakdown">
-</p>
-
-<p align="center"><em>Screenshots use sample data.</em></p>
+<p align="center"><em>Menu bar → usage panel. Sample data.</em></p>
 
 ---
 
@@ -53,16 +40,15 @@ The badge uses each app's real icon, flattened into a monochrome stencil, next t
 1. Grab the latest DMG from [Releases](https://github.com/FR1EDDY/Ullage/releases/latest).
 2. Open it and drag **Ullage** into Applications.
 
-This build is ad-hoc signed, not notarised.
-
-**Right-click the app → Open → Open.** Just once. After that it opens normally.
-
+This build is ad-hoc signed, not notarised. **Right-click → Open → Open** once; after that it launches normally.
 
 ### Homebrew
 
 ```sh
 brew install --cask fr1eddy/ullage/ullage
 ```
+
+Homebrew strips quarantine, so the Gatekeeper dialog usually doesn't appear.
 
 ---
 
@@ -235,7 +221,6 @@ Scripts/release.sh
 MIT — see [LICENSE](LICENSE).
 
 Ullage is not affiliated with Anthropic or Anysphere. It shows the Claude and
-Cursor app icons to identify which service each card reports on — read from the
-installed app when it's present, and from a bundled copy of the same artwork
-when it isn't (`Scripts/refresh_provider_icons.sh`). Those icons are the
+Cursor app icons to identify which service each card reports on, from bundled
+artwork refreshed via `Scripts/refresh_provider_icons.sh`. Those icons are the
 property of their respective owners.
